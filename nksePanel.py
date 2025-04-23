@@ -1,6 +1,7 @@
 import os
 import nuke
 import nkseHighlighter
+import nkCodeEditor
 from PySide2 import QtWidgets, QtGui, QtCore
 
 class NkScriptEditor(QtWidgets.QWidget):
@@ -81,7 +82,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.search_layout_widget.setVisible(False)
 
         # Script Editor text widget
-        self.text_edit = QtWidgets.QTextEdit()
+        self.text_edit = nkCodeEditor.CodeEditor()#QtWidgets.QPlainTextEdit()
         layout.addWidget(self.text_edit)
         self.highlighter = nkseHighlighter.NkHighlighter(self.text_edit.document())
 
