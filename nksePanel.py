@@ -1,8 +1,26 @@
+# -----------------------------------------------------------------------------
+# Nk Script Editor for Nuke
+# Copyright (c) 2025 Jorge Hernandez Ibañez
+#
+# This file is part of the Nk Script Editor project.
+# Repository: https://github.com/JorgeHI/NkScriptEditor
+#
+# This software is licensed under the MIT License.
+# See the LICENSE file in the root of this repository for details.
+# -----------------------------------------------------------------------------
 import os
-import nuke
 import nkseHighlighter
 import nkCodeEditor
-from PySide2 import QtWidgets, QtGui, QtCore
+import nuke
+if nuke.NUKE_VERSION_MAJOR < 11:
+    # PySide for Nuke up to 10
+    from PySide import QtWidgets, QtGui, QtCore
+elif nuke.NUKE_VERSION_MAJOR < 16:
+    # PySide2 for default Nuke 11
+    from PySide2 import QtWidgets, QtGui, QtCore
+else:
+    # PySide6 for Nuke 16+
+    from PySide6 import QtWidgets, QtGui, QtCore
 
 class NkScriptEditor(QtWidgets.QWidget):
     def __init__(self):
@@ -82,9 +100,37 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.search_layout_widget.setVisible(False)
 
         # Script Editor text widget
-        self.text_edit = nkCodeEditor.CodeEditor()#QtWidgets.QPlainTextEdit()
+        self.text_edit = nkCodeEditor.CodeEditor()
         layout.addWidget(self.text_edit)
         self.highlighter = nkseHighlighter.NkHighlighter(self.text_edit.document())
+
+        # Debug Layout
+        self.debug_layout = QtWidgets.QHBoxLayout()
+
+        self.debug_label = QtWidgets.QLabel("Debugging:")
+
+        self.debug_prev_button = QtWidgets.QPushButton("<")
+        self.debug_prev_button.setToolTip("Go to previous breakpoint.")
+        self.debug_next_button = QtWidgets.QPushButton(">")
+        self.debug_next_button.setToolTip("Go to next breakpoint.")
+        self.debug_clear_button = QtWidgets.QPushButton("Clean Points")
+        self.debug_clear_button.setToolTip("Remove all breakpoints")
+        self.debug_paste_button = QtWidgets.QPushButton("Paste")
+        self.debug_paste_button.setToolTip("Paste script until next breakpoint")
+
+        self.override_checkbox = QtWidgets.QCheckBox("Override Node Graph")
+        self.override_checkbox.setChecked(True)
+        self.override_checkbox.setToolTip("Override the current node graph when pasting to avoid duplication.")
+        self.debug_layout.addWidget(self.debug_label)
+        self.debug_layout.addWidget(self.debug_prev_button)
+        self.debug_layout.addWidget(self.debug_next_button)
+        self.debug_layout.addWidget(self.debug_clear_button)
+        self.debug_layout.addWidget(self.override_checkbox)
+        self.debug_layout.addStretch()
+        self.debug_layout.addWidget(self.debug_paste_button)
+
+        layout.addLayout(self.debug_layout)
+
 
         self.save_layout = QtWidgets.QHBoxLayout()
         self.paste_button = QtWidgets.QPushButton("Paste Script")

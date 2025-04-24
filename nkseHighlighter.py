@@ -9,7 +9,16 @@
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
 
-from PySide2 import QtWidgets, QtGui, QtCore
+import nuke
+if nuke.NUKE_VERSION_MAJOR < 11:
+    # PySide for Nuke up to 10
+    from PySide import QtWidgets, QtGui, QtCore
+elif nuke.NUKE_VERSION_MAJOR < 16:
+    # PySide2 for default Nuke 11
+    from PySide2 import QtWidgets, QtGui, QtCore
+else:
+    # PySide6 for Nuke 16+
+    from PySide6 import QtWidgets, QtGui, QtCore
 
 class NkHighlighter(QtGui.QSyntaxHighlighter):
     def __init__(self, document):

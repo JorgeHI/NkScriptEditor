@@ -1,4 +1,24 @@
-from PySide2 import QtWidgets, QtGui, QtCore
+# -----------------------------------------------------------------------------
+# Nk Script Editor for Nuke
+# Copyright (c) 2025 Jorge Hernandez Ibañez
+#
+# This file is part of the Nk Script Editor project.
+# Repository: https://github.com/JorgeHI/NkScriptEditor
+#
+# This software is licensed under the MIT License.
+# See the LICENSE file in the root of this repository for details.
+# -----------------------------------------------------------------------------
+import nuke
+if nuke.NUKE_VERSION_MAJOR < 11:
+    # PySide for Nuke up to 10
+    from PySide import QtWidgets, QtGui, QtCore
+elif nuke.NUKE_VERSION_MAJOR < 16:
+    # PySide2 for default Nuke 11
+    from PySide2 import QtWidgets, QtGui, QtCore
+else:
+    # PySide6 for Nuke 16+
+    from PySide6 import QtWidgets, QtGui, QtCore
+
 import sys
 
 class LineNumberArea(QtWidgets.QWidget):
@@ -11,6 +31,31 @@ class LineNumberArea(QtWidgets.QWidget):
 
     def paintEvent(self, event):
         self.code_editor.line_number_area_paint_event(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            editor = self.code_editor
+            y = event.pos().y()
+
+            block = editor.firstVisibleBlock()
+            block_number = block.blockNumber()
+            top = editor.blockBoundingGeometry(block).translated(editor.contentOffset()).top()
+            bottom = top + editor.blockBoundingRect(block).height()
+
+            while block.isValid() and top <= y:
+                if block.isVisible() and bottom >= y:
+                    line = block_number + 1
+                    if line in editor.breakpoint_lines:
+                        editor.breakpoint_lines.remove(line)
+                    else:
+                        editor.breakpoint_lines.add(line)
+                    self.update()
+                    break
+                block = block.next()
+                top = bottom
+                bottom = top + editor.blockBoundingRect(block).height()
+                block_number += 1
+
 
 class CodeEditor(QtWidgets.QPlainTextEdit):
     def __init__(self):
@@ -46,7 +91,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
 
     def line_number_area_paint_event(self, event):
         painter = QtGui.QPainter(self.line_number_area)
-        painter.fillRect(event.rect(), QtCore.Qt.lightGray)
+        #painter.fillRect(event.rect(), QtCore.Qt.lightGray)
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
@@ -73,33 +118,33 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             bottom = top + self.blockBoundingRect(block).height()
             block_number += 1
 
-    def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
-            x = event.pos().x()
-            if x < self.line_number_area_width():
-                block = self.firstVisibleBlock()
-                top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
-                bottom = top + self.blockBoundingRect(block).height()
-                y = event.pos().y()
-                while block.isValid() and top <= y:
-                    if block.isVisible() and bottom >= y:
-                        line = block.blockNumber() + 1
-                        if line in self.breakpoint_lines:
-                            self.breakpoint_lines.remove(line)
-                        else:
-                            self.breakpoint_lines.add(line)
-                        self.line_number_area.update()
-                        break
-                    block = block.next()
-                    top = bottom
-                    bottom = top + self.blockBoundingRect(block).height()
-        super().mousePressEvent(event)
+    # def mousePressEvent(self, event):
+    #     if event.button() == QtCore.Qt.LeftButton:
+    #         x = event.pos().x()
+    #         if x < self.line_number_area_width():
+    #             block = self.firstVisibleBlock()
+    #             top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+    #             bottom = top + self.blockBoundingRect(block).height()
+    #             y = event.pos().y()
+    #             while block.isValid() and top <= y:
+    #                 if block.isVisible() and bottom >= y:
+    #                     line = block.blockNumber() + 1
+    #                     if line in self.breakpoint_lines:
+    #                         self.breakpoint_lines.remove(line)
+    #                     else:
+    #                         self.breakpoint_lines.add(line)
+    #                     self.line_number_area.update()
+    #                     break
+    #                 block = block.next()
+    #                 top = bottom
+    #                 bottom = top + self.blockBoundingRect(block).height()
+    #     super().mousePressEvent(event)
 
     def highlight_current_line(self):
         extra_selections = []
         if not self.isReadOnly():
             selection = QtWidgets.QTextEdit.ExtraSelection()
-            line_color = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
+            line_color = QtGui.QColor(78, 78, 78)
             selection.format.setBackground(line_color)
             selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
             selection.cursor = self.textCursor()
