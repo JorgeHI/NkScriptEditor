@@ -74,6 +74,9 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
+        self._last_text = self.toPlainText()
+        self.document().contentsChange.connect(self._on_contents_change)
+
     def line_number_area_width(self):
         """Calculate and return the width required for the line number area.
 
@@ -151,6 +154,56 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             selection.cursor.clearSelection()
             extra_selections.append(selection)
         self.setExtraSelections(extra_selections)
+
+    def _on_contents_change(self, position, chars_removed, chars_added):
+        """
+        Called after any document edit:
+          - position is the character offset where the change began
+          - chars_removed is the number of characters removed
+          - chars_added   is the number of characters inserted
+        """
+        # Keep a snapshot of the old text
+        old_text = self._last_text
+        new_text = self.toPlainText()
+
+        # Extract the deleted and inserted substrings
+        removed_text = old_text[position:position + chars_removed]
+        added_text   = new_text[position:position + chars_added]
+
+        # Count how many newline characters were removed or added
+        removed_lines = removed_text.count('\n')
+        added_lines   = added_text.count('\n')
+        delta = added_lines - removed_lines
+
+        # Only adjust breakpoints if the number of logical lines has changed
+        if delta != 0:
+            # Find which logical line the edit happened on
+            block = self.document().findBlock(position)
+            edit_line = block.blockNumber() + 2
+
+            # Shift all breakpoints that are below the edit line
+            updated_breakpoints = set()
+            for bp in self.breakpoint_lines:
+                if bp > edit_line:
+                    updated_breakpoints.add(bp + delta)
+                # If the breakpoint is in the current line remove it
+                elif bp != edit_line:  # else, keep it
+                    updated_breakpoints.add(bp)
+            self.breakpoint_lines = updated_breakpoints
+
+            # Adjust the active debug point as well
+            if self.active_debug_point is not None:
+                if self.active_debug_point > edit_line:
+                    self.active_debug_point += delta
+                elif self.active_debug_point == edit_line and removed_lines > 0:
+                    # If the active line itself was deleted, clear it
+                    self.active_debug_point = None
+
+            # Force a repaint of the line-number gutter
+            self.line_number_area.update()
+
+        # Update our snapshot for the next edit
+        self._last_text = new_text
 
     def get_all_debug_points(self):
         """Return all currently defined debug points in sorted order.

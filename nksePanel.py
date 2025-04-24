@@ -8,7 +8,7 @@
 # This software is licensed under the MIT License.
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
-import os
+import os, sys, tempfile
 import nkseHighlighter
 import nkCodeEditor
 import nuke
@@ -261,29 +261,39 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.file_path_lineedit.setText(file_path)
             self.load_nk_file_into_editor()
 
-    def debug_script(self):
+    def _paste_plain_text(self, script, clean_nodegraph=False):
         try:
-            import tempfile
-            script = self.text_edit.get_text_until_debug_point()
-            temp_path = os.path.join(tempfile.gettempdir(), 'nk_temp_script.nk')
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                f.write(script)
-            nuke.scriptReadFile(temp_path)
-            os.remove(temp_path)
+            app = QtWidgets.QApplication.instance()
+            clipboard = app.clipboard()
+
+            # Backup the current clipboard
+            old_mime = clipboard.mimeData()
+            backup = QtCore.QMimeData()
+            for fmt in old_mime.formats():
+                backup.setData(fmt, old_mime.data(fmt))
+
+            # Override clipboard with PlainText Script
+            clipboard.setText(script)
+            if clean_nodegraph:
+                for node in nuke.allNodes(recurseGroups=False):
+                    nuke.delete(node)
+
+            # Load clipboard in Nuke
+            nuke.nodePaste("%clipboard%")
+
+            # Restore backup
+            clipboard.setMimeData(backup)
         except Exception as e:
             nuke.message(f"Error pasting node graph: {e}")
 
+    def debug_script(self):
+        script = self.text_edit.get_text_until_debug_point()
+        self._paste_plain_text(
+            script, clean_nodegraph=self.override_checkbox.isChecked())
+
     def paste_script(self):
-        try:
-            import tempfile
-            script = self.text_edit.toPlainText()
-            temp_path = os.path.join(tempfile.gettempdir(), 'nk_temp_script.nk')
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                f.write(script)
-            nuke.scriptReadFile(temp_path)
-            os.remove(temp_path)
-        except Exception as e:
-            nuke.message(f"Error pasting node graph: {e}")
+        script = self.text_edit.toPlainText()
+        self._paste_plain_text(script)
 
     def save_script(self):
         file_path = nuke.getFilename('Select a .nk', '*.nk')
