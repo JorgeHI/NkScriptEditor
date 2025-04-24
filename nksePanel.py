@@ -141,7 +141,11 @@ class NkScriptEditor(QtWidgets.QWidget):
         layout.addLayout(self.save_layout)
 
         # Shortcuts
-        search_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self)
+        if hasattr(QtWidgets, 'QShortcut'):
+            ShortcutClass = QtWidgets.QShortcut
+        else:
+            ShortcutClass = QtGui.QShortcut
+        search_shortcut = ShortcutClass(QtGui.QKeySequence("Ctrl+F"), self)
         search_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
         search_shortcut.activated.connect(self.on_ctrl_f_pressed)
         # Signals

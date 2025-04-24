@@ -12,12 +12,15 @@ import nuke
 if nuke.NUKE_VERSION_MAJOR < 11:
     # PySide for Nuke up to 10
     from PySide import QtWidgets, QtGui, QtCore
+    pyside_version = 1
 elif nuke.NUKE_VERSION_MAJOR < 16:
     # PySide2 for default Nuke 11
     from PySide2 import QtWidgets, QtGui, QtCore
+    pyside_version = 2
 else:
     # PySide6 for Nuke 16+
     from PySide6 import QtWidgets, QtGui, QtCore
+    pyside_version = 6
 
 import sys
 
@@ -79,7 +82,10 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                  for the breakpoint indicator.
         """
         digits = len(str(max(1, self.blockCount())))
-        space = 3 + self.fontMetrics().width('9') * digits
+        if pyside_version < 6:
+            space = 3 + self.fontMetrics().width('9') * digits
+        else:
+            space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
         return space + 20  # Extra space for breakpoint indicator
 
     def update_line_number_area_width(self, _):
@@ -89,7 +95,9 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         if dy:
             self.line_number_area.scroll(0, dy)
         else:
-            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+            #self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+            r = QtCore.QRect(0, rect.y(), self.line_number_area.width(), rect.height())
+            self.line_number_area.update(r)
         if rect.contains(self.viewport().rect()):
             self.update_line_number_area_width(0)
 

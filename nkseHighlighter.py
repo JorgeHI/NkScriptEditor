@@ -24,6 +24,10 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
     def __init__(self, document):
         super(NkHighlighter, self).__init__(document)
 
+        if hasattr(QtCore, 'QRegularExpression'):  # PySide6
+            self._qRe_class = QtCore.QRegularExpression
+        else:
+            self._qRe_class = QtCore.QRegExp
         self.highlighting_rules = []
 
         # 5. Node Type
@@ -31,13 +35,13 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.node_name_format.setForeground(QtGui.QColor(255, 200, 150))
         self.node_name_format.setFontWeight(QtGui.QFont.Bold)
         self.node_name_pattern = r"^\s*([a-zA-Z0-9_]+)\s\{$"
-        self.highlighting_rules.append((QtCore.QRegExp(self.node_name_pattern), self.node_name_format))
+        self.highlighting_rules.append((self._qRe_class(self.node_name_pattern), self.node_name_format))
 
         # Flags highlight
         self.plus_format = QtGui.QTextCharFormat()
         self.plus_format.setForeground(QtGui.QColor(120, 180, 255))
         self.flags_pattern = r"\s([\+\-])([A-Z]+)"
-        self.highlighting_rules.append((QtCore.QRegExp(self.flags_pattern), self.plus_format))
+        self.highlighting_rules.append((self._qRe_class(self.flags_pattern), self.plus_format))
 
         # 2. Add user knobs lines
         self.adduser_format = QtGui.QTextCharFormat()
@@ -47,7 +51,7 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.adduser_name_format = QtGui.QTextCharFormat()
         self.adduser_name_format.setForeground(QtGui.QColor(220, 220, 160))  # Crema más suave que amarillo
         self.userknob_pattern = r"^\s*(addUserKnob)\s\{([0-9]+)(?:\s([a-zA-Z0-9_]+))?"
-        self.highlighting_rules.append((QtCore.QRegExp(self.userknob_pattern), self.adduser_format))
+        self.highlighting_rules.append((self._qRe_class(self.userknob_pattern), self.adduser_format))
 
         # 3. Knob names on value set
         self.knob_format = QtGui.QTextCharFormat()
@@ -59,7 +63,7 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.node_name_format.setForeground(QtGui.QColor(255, 255, 255))
         self.node_name_format.setFontWeight(QtGui.QFont.Bold)
         self.knob_pattern = r"^\s*(?!addUserKnob\b)([a-zA-Z0-9_]+)\s([a-zA-Z0-9_\"\\\/\[\]\-]+)"
-        self.highlighting_rules.append((QtCore.QRegExp(self.knob_pattern), self.knob_format))
+        self.highlighting_rules.append((self._qRe_class(self.knob_pattern), self.knob_format))
 
         # 4. Callbacks
         self.callback_format = QtGui.QTextCharFormat()
@@ -71,13 +75,13 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
             r"afterFrameRender|afterRender|afterBackgroundRender|afterBackgroundFrameRender|"
             r"filenameFilter|validateFilename|autoSaveFilter|autoSaveRestoreFilter)\s"
         )
-        self.highlighting_rules.append((QtCore.QRegExp(self.callback_pattern), self.callback_format))
+        self.highlighting_rules.append((self._qRe_class(self.callback_pattern), self.callback_format))
 
         # Invalid characters (non-ASCII visible) -> red
         self.invalid_char_format = QtGui.QTextCharFormat()
         self.invalid_char_format.setForeground(QtGui.QColor(255, 60, 60))
         self.invalid_char_pattern = r"[^\x20-\x7E\t\r\n]"
-        self.highlighting_rules.append((QtCore.QRegExp(self.invalid_char_pattern), self.invalid_char_format))
+        self.highlighting_rules.append((self._qRe_class(self.invalid_char_pattern), self.invalid_char_format))
 
 
     def set_format(self, text, pattern, index, fmt):
@@ -90,43 +94,103 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         for pattern, fmt in self.highlighting_rules:
-            index = pattern.indexIn(text)
-            while index >= 0:
-                length = pattern.matchedLength()
-                # Si es el patrón de knobs indentados, resaltar solo el grupo capturado
-                pattern_re = pattern.pattern()
-                if pattern_re == self.node_name_pattern: # Node Type
-                    captured = pattern.cap(1)
-                    if captured:
-                        try:
-                            start = text.index(captured, index)
-                            self.setFormat(start, len(captured), fmt)
-                        except ValueError:
-                            pass
-                elif pattern_re == self.flags_pattern: # Flags
-                    preflag = pattern.cap(1)
-                    flag = pattern.cap(2)
-                    if preflag and flag:
-                        try:
-                            start = text.index(preflag, index)
-                            self.setFormat(start, len(preflag) + len(flag), fmt)
-                        except ValueError:
-                            pass
-                elif pattern_re == self.userknob_pattern:
-                    addUserKnob = pattern.cap(1)
-                    knob_number = pattern.cap(2)
-                    knob_name = pattern.cap(3)
-                    self.set_format(text, addUserKnob, index, fmt)
-                    self.set_format(text, knob_number, index, self.adduser_number_format)
-                    self.set_format(text, knob_name, index, self.adduser_name_format)
-                elif pattern_re == self.knob_pattern:
-                    knob_name = pattern.cap(1)
-                    if knob_name == "name":
-                        node_name = pattern.cap(2)
-                        self.set_format(text, knob_name, index, self.knob_name_format)
-                        self.set_format(text, node_name, index, self.node_name_format)
+            # Qt6: QRegularExpression
+            if hasattr(pattern, 'globalMatch'):
+                it = pattern.globalMatch(text)
+                while it.hasNext():
+                    match = it.next()
+                    pat = pattern.pattern()
+
+                    if pat == self.node_name_pattern:
+                        start = match.capturedStart(1)
+                        length = match.capturedLength(1)
+                        if start >= 0:
+                            self.setFormat(start, length, fmt)
+
+                    elif pat == self.flags_pattern:
+                        start = match.capturedStart(1)
+                        length = match.capturedLength(1) + match.capturedLength(2)
+                        if start >= 0:
+                            self.setFormat(start, length, fmt)
+
+                    elif pat == self.userknob_pattern:
+                        # grupos: (1)=addUserKnob, (2)=knob_number, (3)=knob_name
+                        for grp, grp_fmt in (
+                            (1, fmt),
+                            (2, self.adduser_number_format),
+                            (3, self.adduser_name_format),
+                        ):
+                            s = match.capturedStart(grp)
+                            l = match.capturedLength(grp)
+                            if s >= 0:
+                                self.setFormat(s, l, grp_fmt)
+
+                    elif pat == self.knob_pattern:
+                        name = match.captured(1)
+                        if name == "name":
+                            s1 = match.capturedStart(1)
+                            l1 = match.capturedLength(1)
+                            s2 = match.capturedStart(2)
+                            l2 = match.capturedLength(2)
+                            self.setFormat(s1, l1, self.knob_name_format)
+                            self.setFormat(s2, l2, self.node_name_format)
+                        else:
+                            s = match.capturedStart(1)
+                            l = match.capturedLength(1)
+                            if s >= 0:
+                                self.setFormat(s, l, fmt)
+
                     else:
-                        self.set_format(text, knob_name, index, fmt)
-                else:
-                    self.setFormat(index, length, fmt)
-                index = pattern.indexIn(text, index + length)
+                        # resaltado completo del match
+                        s0 = match.capturedStart(0)
+                        l0 = match.capturedLength(0)
+                        if s0 >= 0:
+                            self.setFormat(s0, l0, fmt)
+
+            # Qt5: QRegExp
+            else:
+                index = pattern.indexIn(text)
+                while index >= 0:
+                    length = pattern.matchedLength()
+                    pat = pattern.pattern()
+
+                    if pat == self.node_name_pattern:
+                        cap = pattern.cap(1)
+                        if cap:
+                            try:
+                                start = text.index(cap, index)
+                                self.setFormat(start, len(cap), fmt)
+                            except ValueError:
+                                pass
+
+                    elif pat == self.flags_pattern:
+                        pre = pattern.cap(1)
+                        flag = pattern.cap(2)
+                        if pre and flag:
+                            try:
+                                start = text.index(pre, index)
+                                self.setFormat(start, len(pre) + len(flag), fmt)
+                            except ValueError:
+                                pass
+
+                    elif pat == self.userknob_pattern:
+                        a = pattern.cap(1)
+                        num = pattern.cap(2)
+                        nm = pattern.cap(3)
+                        self.set_format(text, a, index, fmt)
+                        self.set_format(text, num, index, self.adduser_number_format)
+                        self.set_format(text, nm, index, self.adduser_name_format)
+
+                    elif pat == self.knob_pattern:
+                        nm = pattern.cap(1)
+                        if nm == "name":
+                            nn = pattern.cap(2)
+                            self.set_format(text, nm, index, self.knob_name_format)
+                            self.set_format(text, nn, index, self.node_name_format)
+                        else:
+                            self.set_format(text, nm, index, fmt)
+
+                    else:
+                        self.setFormat(index, length, fmt)
+
+                    index = pattern.indexIn(text, index + length)
