@@ -115,10 +115,10 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_next_button.setToolTip("Go to next breakpoint.")
         self.debug_clear_button = QtWidgets.QPushButton("Clean Points")
         self.debug_clear_button.setToolTip("Remove all breakpoints")
-        self.debug_paste_button = QtWidgets.QPushButton("Paste")
-        self.debug_paste_button.setToolTip("Paste script until next breakpoint")
+        self.debug_paste_button = QtWidgets.QPushButton("Debug")
+        self.debug_paste_button.setToolTip("Paste script until the current active debug point.")
 
-        self.override_checkbox = QtWidgets.QCheckBox("Override Node Graph")
+        self.override_checkbox = QtWidgets.QCheckBox("Override")
         self.override_checkbox.setChecked(True)
         self.override_checkbox.setToolTip("Override the current node graph when pasting to avoid duplication.")
         self.debug_layout.addWidget(self.debug_label)
@@ -130,7 +130,6 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_layout.addWidget(self.debug_paste_button)
 
         layout.addLayout(self.debug_layout)
-
 
         self.save_layout = QtWidgets.QHBoxLayout()
         self.paste_button = QtWidgets.QPushButton("Paste Script")
@@ -145,6 +144,11 @@ class NkScriptEditor(QtWidgets.QWidget):
         search_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self)
         search_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
         search_shortcut.activated.connect(self.on_ctrl_f_pressed)
+        # Signals
+        self.debug_clear_button.clicked.connect(self.text_edit.clean_all_debug_points)
+        self.debug_prev_button.clicked.connect(self.text_edit.set_prev_debug_point)
+        self.debug_next_button.clicked.connect(self.text_edit.set_next_debug_point)
+        self.debug_paste_button.clicked.connect(self.debug_script)
 
     def on_ctrl_f_pressed(self):
         # Activar búsqueda solo si este panel tiene foco
@@ -233,7 +237,7 @@ class NkScriptEditor(QtWidgets.QWidget):
             nuke.message(f"The filepath '{file_path}' does not exist.")
 
     def toggle_wrap_text(self, checked):
-        self.text_edit.setLineWrapMode(QtWidgets.QTextEdit.WidgetWidth if checked else QtWidgets.QTextEdit.NoWrap)
+        self.text_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth if checked else QtWidgets.QPlainTextEdit.NoWrap)
 
     def load_nodegraph_into_editor(self):
         try:
@@ -252,6 +256,18 @@ class NkScriptEditor(QtWidgets.QWidget):
         if file_path:
             self.file_path_lineedit.setText(file_path)
             self.load_nk_file_into_editor()
+
+    def debug_script(self):
+        try:
+            import tempfile
+            script = self.text_edit.get_text_until_debug_point()
+            temp_path = os.path.join(tempfile.gettempdir(), 'nk_temp_script.nk')
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(script)
+            nuke.scriptReadFile(temp_path)
+            os.remove(temp_path)
+        except Exception as e:
+            nuke.message(f"Error pasting node graph: {e}")
 
     def paste_script(self):
         try:
