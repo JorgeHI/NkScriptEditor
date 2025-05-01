@@ -34,10 +34,29 @@ else:
 
 
 class NkScriptEditor(QtWidgets.QWidget):
+    """
+    Main widget for the Nk Script Editor panel in Nuke.
+
+    This tool provides an integrated editor for viewing and editing `.nk` files
+    with syntax highlighting, breakpoint navigation, and script management capabilities.
+    It features:
+    - Live loading of nodegraph or `.nk` file paths
+    - A custom syntax highlighter for key Nuke script elements
+    - Debugging support with clickable breakpoints and playback slicing
+    - Configurable preferences, including color and bold styles for syntax elements
+    - File encoding options for proper reading/writing of international text
+
+    The panel is structured as a tabbed interface including an "Editor" tab and a "Preferences" tab.
+    """
     def __init__(self):
         super(NkScriptEditor, self).__init__()
 
         self.setWindowTitle("Nk Script Editor")
+
+        if hasattr(QtCore, 'QRegularExpression'):  # PySide6
+            self._qRe_class = QtCore.QRegularExpression
+        else:
+            self._qRe_class = QtCore.QRegExp
 
         # Create the main tab widget that will hold Editor and Preferences tabs
         self.tabs = QtWidgets.QTabWidget(self)
@@ -62,6 +81,18 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         buttons_layout.addWidget(self.load_nodegraph_button)
         buttons_layout.addWidget(self.load_root_button)
+        self.encoding_combo = QtWidgets.QComboBox()
+        self.encoding_combo.addItems(nkConstants.encodings)
+        self.encoding_combo.setCurrentText("utf-8")  # default
+        # Compute minimin width based n the elements
+        font_metrics = self.encoding_combo.fontMetrics()
+        max_width = max(
+            font_metrics.boundingRect(self.encoding_combo.itemText(i)).width()
+            for i in range(self.encoding_combo.count())
+        )
+        self.encoding_combo.setMaximumWidth(max_width + 10)
+        self.encoding_combo.setToolTip("Encoding used for loading and save scripts.")
+        buttons_layout.addWidget(self.encoding_combo)
         editor_layout.addLayout(buttons_layout)
 
         # -- File selector
@@ -201,17 +232,27 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_next_button.clicked.connect(self.text_edit.set_next_debug_point)
         self.debug_paste_button.clicked.connect(self.debug_script)
 
+        # Force refresh to load current preferences state
+        self.prefs_page.force_refresh()
+
     def on_ctrl_f_pressed(self):
-        # Activar búsqueda solo si este panel tiene foco
+        """Show the search bar only if this widget or its text editor is focused."""
         if self.isActiveWindow() or self.text_edit.hasFocus():
             self.show_search_bar()
 
     def show_search_bar(self):
+        """Toggle the visibility of the search bar widget and focus the input if shown."""
         self.search_layout_widget.setVisible(not self.search_layout_widget.isVisible())
         if self.search_layout_widget.isVisible():
             self.search_input.setFocus()
 
     def get_search_value(self):
+        """
+        Generate a regular expression based on the search filter and input text.
+
+        Returns:
+            str: A regular expression string to match in the editor.
+        """
         search_text = self.search_input.text()
         if not search_text:
             return
@@ -227,6 +268,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         return search_text
 
     def find_previous(self):
+        """Find and select the previous occurrence of the search value in the editor."""
         search_text = self.get_search_value()
         if not search_text:
             return
@@ -240,12 +282,13 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.text_edit.setTextCursor(found)
 
     def find_next(self):
+        """Find and select the next occurrence of the search value in the editor."""
         search_text = self.get_search_value()
         if not search_text:
             return
         cursor = self.text_edit.textCursor()
         document = self.text_edit.document()
-        found = document.find(QtCore.QRegExp(search_text), cursor)
+        found = document.find(self._qRe_class(search_text), cursor)
         if found.isNull():
             # Wrap around and search from top
             cursor.setPosition(0)
@@ -254,8 +297,9 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.text_edit.setTextCursor(found)
 
     def find_next_invalid_char(self):
+        """Find and select the next invalid character in the editor."""
         # Regex for invalid characters (same as in NkHighlighter)
-        invalid_pattern = QtCore.QRegExp(r"[^\x20-\x7E\t\r\n]")
+        invalid_pattern = self._qRe_class(nkConstants.nkRegex.invalid)
         document = self.text_edit.document()
         cursor = self.text_edit.textCursor()
         found = document.find(invalid_pattern, cursor)
@@ -271,44 +315,68 @@ class NkScriptEditor(QtWidgets.QWidget):
             nuke.message("No invalid characters found.")
 
     def browse_file(self):
+        """Open a file dialog and populate the file path field with the selected file."""
         file_path = nuke.getFilename('Select a .nk', '*.nk')
         if file_path:
             self.file_path_lineedit.setText(file_path)
 
     def load_nk_file_into_editor(self):
+        """Load a '.nk' file into the editor based on the user-selected encoding."""
         file_path = self.file_path_lineedit.text()
         if file_path and os.path.isfile(file_path):
+            selected_encoding = self.encoding_combo.currentText()
             try:
-                with open(file_path, 'r') as f:
+                with open(file_path, 'r', encoding=selected_encoding) as f:
                     content = f.read()
                     self.text_edit.setPlainText(content)
             except Exception as e:
-                nuke.message(f"No se pudo cargar el archivo:\n{e}")
+                msg = f"Nk file could not be loaded:\n{e}"
+                logger.error(msg)
+                nuke.message(msg)
         else:
-            nuke.message(f"The filepath '{file_path}' does not exist.")
+            msg = f"The filepath '{file_path}' does not exist."
+            logger.error(msg)
+            nuke.message(msg)
 
     def toggle_wrap_text(self, checked):
+        """Enable or disable text wrapping in the editor based on the checkbox state."""
         self.text_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth if checked else QtWidgets.QPlainTextEdit.NoWrap)
 
     def load_nodegraph_into_editor(self):
+        """Dump the current node graph to a temporary file and load its contents into the editor."""
         try:
             import tempfile
             temp_path = os.path.join(tempfile.gettempdir(), 'nk_temp_script.nk')
             nuke.scriptSaveToTemp(temp_path)
-            with open(temp_path, 'r') as f:
+            selected_encoding = self.encoding_combo.currentText()
+            with open(temp_path, 'r', encoding=selected_encoding) as f:
                 content = f.read()
                 self.text_edit.setPlainText(content)
             os.remove(temp_path)
         except Exception as e:
-            nuke.message(f"Error loading node graph: {e}")
+            msg = f"Error loading node graph: {e}"
+            logger.error(msg)
+            nuke.message(msg)
 
     def load_root_into_editor(self):
+        """Load the root Nuke script path into the editor if available."""
         file_path = nuke.scriptName()
         if file_path:
             self.file_path_lineedit.setText(file_path)
             self.load_nk_file_into_editor()
 
     def _paste_plain_text(self, script, clean_nodegraph=False):
+        """
+        Paste the given plain text script into Nuke.
+
+        Args:
+            script (str): Nuke script as plain text.
+            clean_nodegraph (bool): Whether to clear the current node graph before pasting.
+
+        Notes:
+            This method use the %clipboard% to paste the text. It makes a backup
+            of the clipboard to restore it after paste.
+        """
         try:
             app = QtWidgets.QApplication.instance()
             clipboard = app.clipboard()
@@ -326,29 +394,41 @@ class NkScriptEditor(QtWidgets.QWidget):
                     nuke.delete(node)
 
             # Load clipboard in Nuke
-            nuke.nodePaste("%clipboard%")
+            try:
+                nuke.nodePaste("%clipboard%")
+                # TODO look for errors on paste and move the cursor to the line
+            except Exception as e:
+                logger.error(f"Error on script paste: {e}")
 
             # Restore backup
             clipboard.setMimeData(backup)
         except Exception as e:
-            nuke.message(f"Error pasting node graph: {e}")
+            msg = f"Error pasting node graph: {e}"
+            logger.error(msg)
+            nuke.message(msg)
 
     def debug_script(self):
+        """Paste the portion of the script up to the current debug point into Nuke."""
         script = self.text_edit.get_text_until_debug_point()
         self._paste_plain_text(
             script, clean_nodegraph=self.override_checkbox.isChecked())
 
     def paste_script(self):
+        """Paste the entire contents of the editor into Nuke."""
         script = self.text_edit.toPlainText()
         self._paste_plain_text(script)
 
     def save_script(self):
+        """Open a file dialog and save the script to a selected path using chosen encoding."""
         file_path = nuke.getFilename('Select a .nk', '*.nk')
         if file_path:
             script = self.text_edit.toPlainText()
+            selected_encoding = self.encoding_combo.currentText()
             try:
-                with open(file_path, 'w') as f:
+                with open(file_path, 'w', encoding=selected_encoding) as f:
                     f.write(script)
                 nuke.message(f"Script saved to: {file_path}")
             except Exception as e:
-                nuke.message(f"Error saving script: {e}")
+                msg = f"Error saving script: {e}"
+                logger.error(msg)
+                nuke.message(msg)

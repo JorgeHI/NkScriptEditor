@@ -33,11 +33,18 @@ else:
 
 
 class PreferenceTabWidget(QtWidgets.QWidget):
+    """
+    A preferences tab widget for customizing the appearance and behavior of the Nk Script Editor.
+
+    This includes options for toggling text wrapping and setting syntax highlighting
+    preferences such as text color and boldness for different script components.
+    """
 
     wrapTextToggled = QtCore.Signal(bool)
     apply_preferences = QtCore.Signal(dict)
 
     def __init__(self):
+        """Initialize the preference panel with UI elements and load saved or default preferences."""
         super(PreferenceTabWidget, self).__init__()
 
         prefs_layout = QtWidgets.QVBoxLayout(self)
@@ -80,7 +87,6 @@ class PreferenceTabWidget(QtWidgets.QWidget):
             btn.setFixedSize(24, 24)
             # ← here: accept *any* args, ignore them, and use our “attr” default
             btn.clicked.connect(lambda *_, a=attr: self.choose_color(a))
-
             setattr(self, f"{attr}_color_button", btn)
             row.addWidget(btn)
 
@@ -96,7 +102,10 @@ class PreferenceTabWidget(QtWidgets.QWidget):
 
         # Save Preferences buttons
         buttons_layout = QtWidgets.QHBoxLayout(self)
-        self.save_prefs_button = QtWidgets.QPushButton("Save Preferences")
+        self.reset_prefs_button = QtWidgets.QPushButton("Reset")
+        self.reset_prefs_button.clicked.connect(self.reset_pref)
+        buttons_layout.addWidget(self.reset_prefs_button)
+        self.save_prefs_button = QtWidgets.QPushButton("Save")
         self.save_prefs_button.clicked.connect(self.save_preferences)
         buttons_layout.addWidget(self.save_prefs_button)
         prefs_layout.addLayout(buttons_layout)
@@ -105,28 +114,46 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         self.wrap_checkbox.toggled.connect(self.wrapTextToggled.emit)
 
         # Load Preferences
-        # TODO check for a pref file
-        self.apply_default_preferences()
+        if os.path.isfile(nkConstants.pref_filepath):
+            # Load user preferences
+            self.load_preferences(filepath=nkConstants.pref_filepath)
+        else:  # Set default preferences
+            self.apply_default_preferences()
+
+    def force_refresh(self):
+        """Force re-emit of current wrap text and highlight preferences to apply changes instantly."""
+        self.wrapTextToggled.emit(self.wrap_checkbox.isChecked())
+        self.apply_preferences.emit(self.collect_color_preferences())
 
     def apply_default_preferences(self):
-        """
-        Apply default settings for wrap text and highlighting colors/bold states.
-        """
+        """Set default highlighting preferences and wrap setting."""
         # Wrap text default
-        self.wrap_checkbox.setChecked(False)
-
+        prefs = {}
+        prefs["wrap"] = False
         # Defaults for highlight colors
-        defaults = {
-            'node_type':       {'color': QtGui.QColor(255, 200, 150), 'bold': True},
-            'flag':            {'color': QtGui.QColor(120, 180, 255), 'bold': False},
-            'node_name':       {'color': QtGui.QColor(255, 255, 255), 'bold': True},
-            'knob':            {'color': QtGui.QColor(200, 160, 255), 'bold': False},
-            'user_knob':       {'color': QtGui.QColor(240, 220, 160), 'bold': False},
-            'user_knob_name':  {'color': QtGui.QColor(220, 220, 160), 'bold': False},
-            'callback':        {'color': QtGui.QColor(128, 200, 255), 'bold': True},
+        prefs["highlight"] = {
+            'node_type':       {'color': [255, 200, 150], 'bold': True},
+            'flag':            {'color': [120, 180, 255], 'bold': False},
+            'node_name':       {'color': [255, 255, 255], 'bold': True},
+            'knob':            {'color': [200, 160, 255], 'bold': False},
+            'user_knob':       {'color': [240, 220, 160], 'bold': False},
+            'user_knob_name':  {'color': [220, 220, 160], 'bold': False},
+            'callback':        {'color': [128, 200, 255], 'bold': True},
         }
-        for attr, opts in defaults.items():
-            color = opts['color']
+        self.set_preferences(prefs)
+
+    def set_preferences(self, prefs):
+        """
+        Apply a dictionary of saved preferences to the UI widgets.
+
+        Args:
+            prefs (dict): The preference dictionary with wrap and highlight settings.
+        """
+        if prefs.get("wrap") is not None:
+            self.wrap_checkbox.setChecked(prefs["wrap"])
+        highlight_prefs = prefs.get("highlight", {})
+        for attr, opts in highlight_prefs.items():
+            color = QtGui.QColor(*opts['color'])
             bold = opts['bold']
             # Set color button stylesheet
             btn = getattr(self, f"{attr}_color_button")
@@ -136,9 +163,18 @@ class PreferenceTabWidget(QtWidgets.QWidget):
             chk = getattr(self, f"{attr}_bold_checkbox")
             chk.setChecked(bold)
 
+    def reset_pref(self):
+        """Reset preferences to their default values and update UI accordingly."""
+        self.apply_default_preferences()
+        self.force_refresh()
 
     def choose_color(self, attr):
-        """Open a QColorDialog, store the chosen color, and update the button background."""
+        """
+        Open a QColorDialog to pick a color and apply it to the given attribute.
+
+        Args:
+            attr (str): The attribute name whose color is being set.
+        """
         color = QtWidgets.QColorDialog.getColor(parent=self)
         if not color.isValid():
             return
@@ -152,22 +188,30 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         self.apply_preferences.emit(self.collect_color_preferences())
         logger.debug(f"Apply changes submited.")
 
+    def load_preferences(self, filepath=None):
+        """
+        Load user preferences from a .pref JSON file.
+
+        Args:
+            filepath (str, optional): Custom path to preference file. Defaults to nkConstants.pref_filepath.
+        """
+        pref_path = filepath or nkConstants.pref_filepath
+        try:
+            with open(pref_path, 'r') as f:
+                prefs_data = json.load(f)
+            self.set_preferences(prefs_data)
+        except Exception as e:
+            logger.error(f"Failed to load preferences: {e}")
+            logger.warning("Applying default preferences "
+                "because local pref file can not be read")
+            self.apply_default_preferences()
+
     def save_preferences(self):
         """
-        Gather color and bold settings for each preference item,
-        then persist them as a JSON file with .pref extension under ~/.nuke/NkScriptEditor/.
+        Save current editor preferences to disk in a JSON .pref file under the user's config folder.
         """
         # 1. Build preferences dict
-        prefs = {}
-        for label_text, attr in self.pref_items:
-            color = getattr(self, f"{attr}_color", None)
-            bold  = getattr(self, f"{attr}_bold_checkbox").isChecked()
-            # Store color as hex string if present
-            prefs[attr] = {
-                "color": color.name() if color else None,
-                "bold": bold
-            }
-
+        prefs = self.collect_preferences()
         # 2. Create output dir
         os.makedirs(nkConstants.config_dir, exist_ok=True)
         filepath = nkConstants.pref_filepath
@@ -196,7 +240,7 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         Collect current highlight color and bold settings for each preference item.
 
         Returns:
-            dict: A dictionary mapping each attribute name to a dict with keys 'color' (QtGui.QColor) and 'bold' (bool).
+            dict: Mapping from attribute names to dictionaries with 'color' and 'bold' keys.
         """
         prefs = {}
         for label_text, attr in self.pref_items:
@@ -211,4 +255,16 @@ class PreferenceTabWidget(QtWidgets.QWidget):
             }
         return prefs
 
+    def collect_preferences(self):
+        """
+        Collect all user preferences including wrap setting and syntax highlight formatting.
+
+        Returns:
+            dict: Full preference dictionary including "wrap" and "highlight" keys.
+        """
+        prefs = {}
+        prefs["wrap"] = self.wrap_checkbox.isChecked()
+        prefs["highlight"] = self.collect_color_preferences()
+
+        return prefs
 

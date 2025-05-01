@@ -9,6 +9,7 @@
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
 from NkScriptEditor import nkUtils
+from NkScriptEditor import nkConstants
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -35,17 +36,12 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.highlighting_rules = []
 
         # Prepare default formats and patterns
-        self.node_name_pattern = r"^\s*([a-zA-Z0-9_]+)\s\{$"
-        self.flags_pattern = r"\s([\+\-])([A-Z]+)"
-        self.userknob_pattern = r"^\s*(addUserKnob)\s\{([0-9]+)(?:\s([a-zA-Z0-9_]+))?"
-        self.knob_pattern = r"^\s*(?!addUserKnob\b)([a-zA-Z0-9_]+)\s([a-zA-Z0-9_\"\\/\[\]\-]+)"
-        self.callback_pattern = (
-            r"^\s+(?:OnUserCreate|onCreate|onScriptLoad|onScriptSave|onScriptClose|"
-            r"onDestroy|knobChanged|updateUI|autolabel|beforeRender|beforeFrameRender|"
-            r"afterFrameRender|afterRender|afterBackgroundRender|afterBackgroundFrameRender|"
-            r"filenameFilter|validateFilename|autoSaveFilter|autoSaveRestoreFilter)\s"
-        )
-        self.invalid_char_pattern = r"[^\x20-\x7E\t\r\n]"
+        self.node_name_pattern = nkConstants.nkRegex.node_name
+        self.flags_pattern = nkConstants.nkRegex.flags
+        self.userknob_pattern = nkConstants.nkRegex.userknob
+        self.knob_pattern = nkConstants.nkRegex.knob
+        self.callback_pattern = nkConstants.nkRegex.callback
+        self.invalid_char_pattern = nkConstants.nkRegex.invalid
         # Default QTextCharFormat setups
         self.formats = {
             'node_type':      self.make_format((255,200,150), bold=True),
@@ -95,7 +91,6 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
             if key in self.formats and isinstance(fmt, QtGui.QTextCharFormat):
                 self.formats[key] = fmt
             elif fmt.get('color') is not None:
-                logger.debug(f"Processing format: {fmt}")
                 self.formats[key] = self.make_format(
                     fmt.get('color'), bold=fmt.get('bold', False))
             else:
