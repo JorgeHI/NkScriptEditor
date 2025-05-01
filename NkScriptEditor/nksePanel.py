@@ -11,10 +11,16 @@
 import os
 import sys
 import tempfile
+import json
 
-import nkseHighlighter
-import nkCodeEditor
 import nuke
+from NkScriptEditor import nkseHighlighter
+from NkScriptEditor import nkCodeEditor
+from NkScriptEditor import nkPreferences
+from NkScriptEditor import nkConstants
+from NkScriptEditor import nkUtils
+# Create logger
+logger = nkUtils.getLogger(__name__)
 
 if nuke.NUKE_VERSION_MAJOR < 11:
     # PySide for Nuke up to 10
@@ -72,14 +78,6 @@ class NkScriptEditor(QtWidgets.QWidget):
         file_selector_layout.addWidget(self.browse_button)
         file_selector_layout.addWidget(self.load_nk_button)
         editor_layout.addLayout(file_selector_layout)
-
-        # -- Configuration (Wrap Text)
-        config_layout = QtWidgets.QHBoxLayout()
-        self.wrap_checkbox = QtWidgets.QCheckBox("Wrap text")
-        self.wrap_checkbox.setChecked(True)
-        self.wrap_checkbox.toggled.connect(self.toggle_wrap_text)
-        config_layout.addWidget(self.wrap_checkbox)
-        editor_layout.addLayout(config_layout)
 
         # -- Search bar (hidden by default)
         self.search_layout = QtWidgets.QHBoxLayout()
@@ -169,52 +167,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         # ----------------------
         # 2) Preferences Tab
         # ----------------------
-        self.prefs_page = QtWidgets.QWidget()
-        prefs_layout = QtWidgets.QVBoxLayout(self.prefs_page)
-
-        # Define the list of preference items: label and attribute prefix
-        self.pref_items = [
-            ("Node Type",        "node_type"),
-            ("Node Name",        "node_name"),
-            ("Knob",             "knob"),
-            ("User Knob",        "user_knob"),
-            ("User Knob Name",   "user_knob_name"),
-            ("Flag",             "flag"),
-            ("Callback",         "callback"),
-        ]
-
-        # Create one horizontal row per preference item
-        for label_text, attr in self.pref_items:
-            # Horizontal layout: Label → Color Picker → Bold Checkbox
-            row = QtWidgets.QHBoxLayout()
-
-            # 1) Label
-            lbl = QtWidgets.QLabel(f"{label_text}:")
-            row.addWidget(lbl)
-
-            # 2) Color picker button
-            btn = QtWidgets.QPushButton()
-            btn.setFixedSize(24, 24)
-            # ← here: accept *any* args, ignore them, and use our “attr” default
-            btn.clicked.connect(lambda *_, a=attr: self.choose_color(a))
-            setattr(self, f"{attr}_color_button", btn)
-            row.addWidget(btn)
-
-            # 3) Bold checkbox
-            chk = QtWidgets.QCheckBox("Bold")
-            setattr(self, f"{attr}_bold_checkbox", chk)
-            row.addWidget(chk)
-
-            prefs_layout.addLayout(row)
-
-        # Add stretch to push the Save button to the bottom
-        prefs_layout.addStretch()
-
-        # Save Preferences button
-        self.save_prefs_button = QtWidgets.QPushButton("Save Preferences")
-        self.save_prefs_button.clicked.connect(self.save_preferences)
-        prefs_layout.addWidget(self.save_prefs_button)
-        # Add the Preferences page to the tabs
+        self.prefs_page = nkPreferences.PreferenceTabWidget()
         self.tabs.addTab(self.prefs_page, "Preferences")
 
         # Show Editor tab by default
@@ -239,6 +192,8 @@ class NkScriptEditor(QtWidgets.QWidget):
         search_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
         search_shortcut.activated.connect(self.on_ctrl_f_pressed)
 
+        # Preference signals
+        self.prefs_page.wrapTextToggled.connect(self.toggle_wrap_text)
         # Debug button connections
         self.debug_clear_button.clicked.connect(self.text_edit.clean_all_debug_points)
         self.debug_prev_button.clicked.connect(self.text_edit.set_prev_debug_point)
@@ -254,31 +209,6 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.search_layout_widget.setVisible(not self.search_layout_widget.isVisible())
         if self.search_layout_widget.isVisible():
             self.search_input.setFocus()
-
-    def choose_color(self, attr):
-        """Open a QColorDialog, store the chosen color, and update the button background."""
-        color = QtWidgets.QColorDialog.getColor(parent=self)
-        if not color.isValid():
-            return
-        # Update the button's stylesheet to show the selected color
-        btn = getattr(self, f"{attr}_color_button")
-        btn.setStyleSheet(f"background-color: {color.name()};")
-        # Store the color object
-        setattr(self, f"{attr}_color", color)
-
-    def save_preferences(self):
-        """
-        Gather color and bold settings for each preference item,
-        then persist or apply them as needed.
-        """
-        prefs = {}
-        for label_text, attr in self.pref_items:
-            color = getattr(self, f"{attr}_color", None)
-            bold  = getattr(self, f"{attr}_bold_checkbox").isChecked()
-            prefs[attr] = {"color": color, "bold": bold}
-        # TODO: Persist to disk or apply immediately
-        print("Preferences saved:", prefs)
-
 
     def get_search_value(self):
         search_text = self.search_input.text()

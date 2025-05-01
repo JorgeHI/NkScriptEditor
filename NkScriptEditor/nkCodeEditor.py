@@ -8,6 +8,10 @@
 # This software is licensed under the MIT License.
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
+from NkScriptEditor import nkUtils
+# Create logger
+logger = nkUtils.getLogger(__name__)
+
 import nuke
 if nuke.NUKE_VERSION_MAJOR < 11:
     # PySide for Nuke up to 10

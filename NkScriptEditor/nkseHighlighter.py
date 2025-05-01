@@ -8,6 +8,9 @@
 # This software is licensed under the MIT License.
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
+from NkScriptEditor import nkUtils
+# Create logger
+logger = nkUtils.getLogger(__name__)
 
 import nuke
 if nuke.NUKE_VERSION_MAJOR < 11:
@@ -38,10 +41,10 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.highlighting_rules.append((self._qRe_class(self.node_name_pattern), self.node_name_format))
 
         # Flags highlight
-        self.plus_format = QtGui.QTextCharFormat()
-        self.plus_format.setForeground(QtGui.QColor(120, 180, 255))
+        self.flags_format = QtGui.QTextCharFormat()
+        self.flags_format.setForeground(QtGui.QColor(120, 180, 255))
         self.flags_pattern = r"\s([\+\-])([A-Z]+)"
-        self.highlighting_rules.append((self._qRe_class(self.flags_pattern), self.plus_format))
+        self.highlighting_rules.append((self._qRe_class(self.flags_pattern), self.flags_format))
 
         # 2. Add user knobs lines
         self.adduser_format = QtGui.QTextCharFormat()
@@ -82,6 +85,16 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
         self.invalid_char_format.setForeground(QtGui.QColor(255, 60, 60))
         self.invalid_char_pattern = r"[^\x20-\x7E\t\r\n]"
         self.highlighting_rules.append((self._qRe_class(self.invalid_char_pattern), self.invalid_char_format))
+
+        self.formats = {
+            'node_type':       self.node_name_format,
+            'flag':            self.flags_format,
+            'node_name':       self.node_name_format,
+            'knob':            self.knob_format,
+            'user_knob':       self.adduser_format,
+            'user_knob_name':  self.adduser_name_format,
+            'callback':        self.callback_format,
+        }
 
 
     def set_format(self, text, pattern, index, fmt):
