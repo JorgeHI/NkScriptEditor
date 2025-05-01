@@ -194,6 +194,7 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # Preference signals
         self.prefs_page.wrapTextToggled.connect(self.toggle_wrap_text)
+        self.prefs_page.apply_preferences.connect(self.highlighter.update_formats)
         # Debug button connections
         self.debug_clear_button.clicked.connect(self.text_edit.clean_all_debug_points)
         self.debug_prev_button.clicked.connect(self.text_edit.set_prev_debug_point)

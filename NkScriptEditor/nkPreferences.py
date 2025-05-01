@@ -35,6 +35,7 @@ else:
 class PreferenceTabWidget(QtWidgets.QWidget):
 
     wrapTextToggled = QtCore.Signal(bool)
+    apply_preferences = QtCore.Signal(dict)
 
     def __init__(self):
         super(PreferenceTabWidget, self).__init__()
@@ -79,6 +80,7 @@ class PreferenceTabWidget(QtWidgets.QWidget):
             btn.setFixedSize(24, 24)
             # ← here: accept *any* args, ignore them, and use our “attr” default
             btn.clicked.connect(lambda *_, a=attr: self.choose_color(a))
+
             setattr(self, f"{attr}_color_button", btn)
             row.addWidget(btn)
 
@@ -92,10 +94,12 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         # Add stretch to push the Save button to the bottom
         prefs_layout.addStretch()
 
-        # Save Preferences button
+        # Save Preferences buttons
+        buttons_layout = QtWidgets.QHBoxLayout(self)
         self.save_prefs_button = QtWidgets.QPushButton("Save Preferences")
         self.save_prefs_button.clicked.connect(self.save_preferences)
-        prefs_layout.addWidget(self.save_prefs_button)
+        buttons_layout.addWidget(self.save_prefs_button)
+        prefs_layout.addLayout(buttons_layout)
 
         # Signals
         self.wrap_checkbox.toggled.connect(self.wrapTextToggled.emit)
@@ -143,7 +147,10 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         btn.setStyleSheet(f"background-color: {color.name()};")
         # Store the color object
         setattr(self, f"{attr}_color", color)
+        # Make sure color changes update the color
         logger.debug(f"Color saved: {str(color)}")
+        self.apply_preferences.emit(self.collect_color_preferences())
+        logger.debug(f"Apply changes submited.")
 
     def save_preferences(self):
         """
@@ -183,4 +190,25 @@ class PreferenceTabWidget(QtWidgets.QWidget):
                 "Save Error",
                 f"Failed to save preferences:\n{e}"
             )
+
+    def collect_color_preferences(self):
+        """
+        Collect current highlight color and bold settings for each preference item.
+
+        Returns:
+            dict: A dictionary mapping each attribute name to a dict with keys 'color' (QtGui.QColor) and 'bold' (bool).
+        """
+        prefs = {}
+        for label_text, attr in self.pref_items:
+            # Retrieve stored color; may be None if not set
+            qcolor = getattr(self, f"{attr}_color", None)
+            color = qcolor.getRgb()[:3] if isinstance(qcolor, QtGui.QColor) else None
+            # Retrieve bold state from checkbox
+            bold = getattr(self, f"{attr}_bold_checkbox").isChecked()
+            prefs[attr] = {
+                'color': color,
+                'bold': bold
+            }
+        return prefs
+
 

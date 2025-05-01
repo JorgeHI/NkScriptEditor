@@ -23,6 +23,7 @@ else:
     # PySide6 for Nuke 16+
     from PySide6 import QtWidgets, QtGui, QtCore
 
+
 class NkHighlighter(QtGui.QSyntaxHighlighter):
     def __init__(self, document):
         super(NkHighlighter, self).__init__(document)
@@ -33,69 +34,77 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
             self._qRe_class = QtCore.QRegExp
         self.highlighting_rules = []
 
-        # 5. Node Type
-        self.node_name_format = QtGui.QTextCharFormat()
-        self.node_name_format.setForeground(QtGui.QColor(255, 200, 150))
-        self.node_name_format.setFontWeight(QtGui.QFont.Bold)
+        # Prepare default formats and patterns
         self.node_name_pattern = r"^\s*([a-zA-Z0-9_]+)\s\{$"
-        self.highlighting_rules.append((self._qRe_class(self.node_name_pattern), self.node_name_format))
-
-        # Flags highlight
-        self.flags_format = QtGui.QTextCharFormat()
-        self.flags_format.setForeground(QtGui.QColor(120, 180, 255))
         self.flags_pattern = r"\s([\+\-])([A-Z]+)"
-        self.highlighting_rules.append((self._qRe_class(self.flags_pattern), self.flags_format))
-
-        # 2. Add user knobs lines
-        self.adduser_format = QtGui.QTextCharFormat()
-        self.adduser_format.setForeground(QtGui.QColor(240, 220, 160))  # Crema más suave que amarillo
-        self.adduser_number_format = QtGui.QTextCharFormat()
-        self.adduser_number_format.setForeground(QtGui.QColor(220, 220, 160))  # Crema más suave que amarillo
-        self.adduser_name_format = QtGui.QTextCharFormat()
-        self.adduser_name_format.setForeground(QtGui.QColor(220, 220, 160))  # Crema más suave que amarillo
         self.userknob_pattern = r"^\s*(addUserKnob)\s\{([0-9]+)(?:\s([a-zA-Z0-9_]+))?"
-        self.highlighting_rules.append((self._qRe_class(self.userknob_pattern), self.adduser_format))
-
-        # 3. Knob names on value set
-        self.knob_format = QtGui.QTextCharFormat()
-        self.knob_format.setForeground(QtGui.QColor(200, 160, 255))
-        self.knob_name_format = QtGui.QTextCharFormat()
-        self.knob_name_format.setForeground(QtGui.QColor(200, 160, 255))
-        self.knob_name_format.setFontWeight(QtGui.QFont.Bold)
-        self.node_name_format = QtGui.QTextCharFormat()
-        self.node_name_format.setForeground(QtGui.QColor(255, 255, 255))
-        self.node_name_format.setFontWeight(QtGui.QFont.Bold)
-        self.knob_pattern = r"^\s*(?!addUserKnob\b)([a-zA-Z0-9_]+)\s([a-zA-Z0-9_\"\\\/\[\]\-]+)"
-        self.highlighting_rules.append((self._qRe_class(self.knob_pattern), self.knob_format))
-
-        # 4. Callbacks
-        self.callback_format = QtGui.QTextCharFormat()
-        self.callback_format.setForeground(QtGui.QColor(128, 200, 255))  # Azul claro
-        self.callback_format.setFontWeight(QtGui.QFont.Bold)
+        self.knob_pattern = r"^\s*(?!addUserKnob\b)([a-zA-Z0-9_]+)\s([a-zA-Z0-9_\"\\/\[\]\-]+)"
         self.callback_pattern = (
             r"^\s+(?:OnUserCreate|onCreate|onScriptLoad|onScriptSave|onScriptClose|"
             r"onDestroy|knobChanged|updateUI|autolabel|beforeRender|beforeFrameRender|"
             r"afterFrameRender|afterRender|afterBackgroundRender|afterBackgroundFrameRender|"
             r"filenameFilter|validateFilename|autoSaveFilter|autoSaveRestoreFilter)\s"
         )
-        self.highlighting_rules.append((self._qRe_class(self.callback_pattern), self.callback_format))
-
-        # Invalid characters (non-ASCII visible) -> red
-        self.invalid_char_format = QtGui.QTextCharFormat()
-        self.invalid_char_format.setForeground(QtGui.QColor(255, 60, 60))
         self.invalid_char_pattern = r"[^\x20-\x7E\t\r\n]"
-        self.highlighting_rules.append((self._qRe_class(self.invalid_char_pattern), self.invalid_char_format))
-
+        # Default QTextCharFormat setups
         self.formats = {
-            'node_type':       self.node_name_format,
-            'flag':            self.flags_format,
-            'node_name':       self.node_name_format,
-            'knob':            self.knob_format,
-            'user_knob':       self.adduser_format,
-            'user_knob_name':  self.adduser_name_format,
-            'callback':        self.callback_format,
+            'node_type':      self.make_format((255,200,150), bold=True),
+            'node_name':      self.make_format((255,255,255), bold=True),
+            'flag':           self.make_format((120,180,255)),
+            'user_knob':      self.make_format((240,220,160)),
+            'user_knob_num':  self.make_format((220,220,160)),
+            'user_knob_name': self.make_format((220,220,160)),
+            'knob':           self.make_format((200,160,255)),
+            'callback':       self.make_format((128,200,255), bold=True),
+            'invalid':        self.make_format((255,60,60)),
         }
 
+        # Build initial rules list
+        self._build_highlighting_rules()
+
+    def make_format(self, color, bold=False):
+        fmt = QtGui.QTextCharFormat()
+        fmt.setForeground(QtGui.QColor(*color))
+        if bold:
+            fmt.setFontWeight(QtGui.QFont.Bold)
+        return fmt
+
+    def _build_highlighting_rules(self):
+        """
+        Internal: constructs the highlighting_rules list from patterns and current formats.
+        """
+        self.highlighting_rules = [
+            (self._qRe_class(self.node_name_pattern), self.formats['node_type']),
+            (self._qRe_class(self.flags_pattern), self.formats['flag']),
+            (self._qRe_class(self.userknob_pattern), self.formats['user_knob']),
+            (self._qRe_class(self.knob_pattern), self.formats['knob']),
+            (self._qRe_class(self.callback_pattern), self.formats['callback']),
+            (self._qRe_class(self.invalid_char_pattern), self.formats['invalid']),
+        ]
+
+    def update_formats(self, new_formats):
+        """
+        Update text formats for each attribute and rebuild highlighting rules.
+
+        Args:
+            new_formats (dict): mapping attribute names (keys in self.formats)
+                                to QtGui.QTextCharFormat instances.
+        """
+        # Replace existing formats where provided
+        for key, fmt in new_formats.items():
+            if key in self.formats and isinstance(fmt, QtGui.QTextCharFormat):
+                self.formats[key] = fmt
+            elif fmt.get('color') is not None:
+                logger.debug(f"Processing format: {fmt}")
+                self.formats[key] = self.make_format(
+                    fmt.get('color'), bold=fmt.get('bold', False))
+            else:
+                logger.error(f"Format {fmt} can not be recononized.")
+
+        # Rebuild rules with updated formats
+        self._build_highlighting_rules()
+        # Re-apply highlighting to existing document
+        self.rehighlight()
 
     def set_format(self, text, pattern, index, fmt):
         if pattern:
@@ -127,11 +136,11 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
                             self.setFormat(start, length, fmt)
 
                     elif pat == self.userknob_pattern:
-                        # grupos: (1)=addUserKnob, (2)=knob_number, (3)=knob_name
+                        # groups: (1)=addUserKnob, (2)=knob_number, (3)=knob_name
                         for grp, grp_fmt in (
                             (1, fmt),
-                            (2, self.adduser_number_format),
-                            (3, self.adduser_name_format),
+                            (2, self.formats['user_knob_num']),
+                            (3, self.formats['user_knob_name']),
                         ):
                             s = match.capturedStart(grp)
                             l = match.capturedLength(grp)
@@ -145,8 +154,8 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
                             l1 = match.capturedLength(1)
                             s2 = match.capturedStart(2)
                             l2 = match.capturedLength(2)
-                            self.setFormat(s1, l1, self.knob_name_format)
-                            self.setFormat(s2, l2, self.node_name_format)
+                            self.setFormat(s1, l1, fmt)
+                            self.setFormat(s2, l2, self.formats['node_name'])
                         else:
                             s = match.capturedStart(1)
                             l = match.capturedLength(1)
@@ -159,7 +168,6 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
                         l0 = match.capturedLength(0)
                         if s0 >= 0:
                             self.setFormat(s0, l0, fmt)
-
             # Qt5: QRegExp
             else:
                 index = pattern.indexIn(text)
@@ -191,15 +199,15 @@ class NkHighlighter(QtGui.QSyntaxHighlighter):
                         num = pattern.cap(2)
                         nm = pattern.cap(3)
                         self.set_format(text, a, index, fmt)
-                        self.set_format(text, num, index, self.adduser_number_format)
-                        self.set_format(text, nm, index, self.adduser_name_format)
+                        self.set_format(text, num, index, self.formats['user_knob_num'])
+                        self.set_format(text, nm, index, self.formats['user_knob_name'])
 
                     elif pat == self.knob_pattern:
                         nm = pattern.cap(1)
                         if nm == "name":
                             nn = pattern.cap(2)
-                            self.set_format(text, nm, index, self.knob_name_format)
-                            self.set_format(text, nn, index, self.node_name_format)
+                            self.set_format(text, nm, index, fmt)
+                            self.set_format(text, nn, index, self.formats['node_name'])
                         else:
                             self.set_format(text, nm, index, fmt)
 
