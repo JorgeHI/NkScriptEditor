@@ -39,6 +39,16 @@ Quick help and links to the tool pages.
 # Documentation
 WIP
 
+## Installation
+
+1. Copy the `NkScriptEditor` folder and paste it in a folder that it's in your Nuke plugin path. The most common one, inside the `Users/YourUser/.nuke` directory.
+2. Open with a text editor the file `menu.py` that lives next to your `NkScriptEditor` folder, or create one if it doesn’t exist.
+3. Add this code:
+```python
+import NkScriptEditor
+```
+4. Restart Nuke.
+
 # Supported Versions
 
 ![Static Badge](https://img.shields.io/badge/Nuke-%3E%3D13.0-yellow?style=flat&logo=nuke&logoColor=yellow&logoSize=auto)
@@ -59,6 +69,7 @@ WIP
 - Improve paste system to use clipboard with backup.
 - Add Help tab.
 - Improve code documentation.
+- Support PySide6 and PySide2 -> Support for Nuke 16.0 >=
 
 ## 0.1.0 
     First release
