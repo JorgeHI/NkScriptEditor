@@ -233,6 +233,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
     def add_debug_point(self, line):
         """Adds a debug point to the line given."""
         self.breakpoint_lines.add(line)
+        logger.debug(f"Debug point {line} added.")
 
     def set_active_debug_point(self, line):
         """
@@ -241,6 +242,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         """
         if line in self.breakpoint_lines:
             self.active_debug_point = line
+            logger.debug(f"Debug point {line} set.")
         else:
             logger.error(f"The line {line} is not in the breakpoint line list. "
                          f"It can not be an active breakpoint.")
@@ -262,6 +264,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         self.breakpoint_lines.clear()
         self.active_debug_point = None
         self.line_number_area.update()
+        logger.debug(f"Debug points removed.")
 
     def get_next_debug_point(self):
         """Return the next debug point after the active one, or the first if none is active.
@@ -274,9 +277,11 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         if not points:
             return None
         if self.active_debug_point is None:
+            logger.debug(f"Next point found {points[0]}.")
             return points[0]
         for point in points:
             if point > self.active_debug_point:
+                logger.debug(f"Next point found {point}.")
                 return point
         return None  # No next point
 
@@ -291,9 +296,11 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         if not points:
             return None
         if self.active_debug_point is None:
+            logger.debug(f"Previous point found {points[-1]}.")
             return points[-1]
         for point in reversed(points):
             if point < self.active_debug_point:
+                logger.debug(f"Previous point found {point}.")
                 return point
         return None  # No previous point
 

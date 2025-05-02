@@ -8,13 +8,19 @@
 # This file is licensed under the GNU General Public License v3.0.
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
+# Def tool version
+version = "0.1.1"
 
+# Init tool
 import nukescripts
-from NkScriptEditor import nksePanel
 from NkScriptEditor import nkUtils
 
 # Create logger
 logger = nkUtils.getLogger("NkScriptEditor")
+
+
+
+from NkScriptEditor import nksePanel
 
 def add_nk_script_editor_panel():
     logger.debug("Panel Created")

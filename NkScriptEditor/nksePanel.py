@@ -17,6 +17,7 @@ import nuke
 from NkScriptEditor import nkseHighlighter
 from NkScriptEditor import nkCodeEditor
 from NkScriptEditor import nkPreferences
+from NkScriptEditor import nkHelpTab
 from NkScriptEditor import nkConstants
 from NkScriptEditor import nkUtils
 # Create logger
@@ -200,6 +201,12 @@ class NkScriptEditor(QtWidgets.QWidget):
         # ----------------------
         self.prefs_page = nkPreferences.PreferenceTabWidget()
         self.tabs.addTab(self.prefs_page, "Preferences")
+
+        # ----------------------
+        # 3) Help Tab
+        # ----------------------
+        self.help_page = nkHelpTab.HelpTabWidget()
+        self.tabs.addTab(self.help_page, "Help")
 
         # Show Editor tab by default
         self.tabs.setCurrentIndex(0)
