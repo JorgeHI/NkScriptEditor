@@ -39,7 +39,7 @@ class HelpTabWidget(QtWidgets.QWidget):
 
         # Info label
         info_label = QtWidgets.QLabel(
-            f'<b>Nk Script Editor v{nkseVersion}</b> - Node developed by Jorge Hernandez Ibañez (JorgeHI)<br>'
+            f'<b>Nk Script Editor v{nkseVersion}</b> - Tool developed by Jorge Hernandez Ibañez (JorgeHI)<br>'
             f'<span style="color: gray;">For assistance or bug report contact: info@jorgehi.com</span>'
         )
         info_label.setWordWrap(True)
