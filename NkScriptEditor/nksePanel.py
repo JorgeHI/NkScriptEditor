@@ -342,8 +342,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         """Enable or disable text wrapping in the editor based on the checkbox state."""
         self.text_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth if checked else QtWidgets.QPlainTextEdit.NoWrap)
 
-    def load_nodegraph_into_editor(self):
-        """Dump the current node graph to a temporary file and load its contents into the editor."""
+    def get_nodegraph_script(self):
         try:
             import tempfile
             temp_path = os.path.join(tempfile.gettempdir(), 'nk_temp_script.nk')
@@ -351,12 +350,19 @@ class NkScriptEditor(QtWidgets.QWidget):
             selected_encoding = self.encoding_combo.currentText()
             with open(temp_path, 'r', encoding=selected_encoding) as f:
                 content = f.read()
-                self.text_edit.setPlainText(content)
             os.remove(temp_path)
         except Exception as e:
             msg = f"Error loading node graph: {e}"
             logger.error(msg)
             nuke.message(msg)
+            return
+        return content
+
+    def load_nodegraph_into_editor(self):
+        """Dump the current node graph to a temporary file and load its contents into the editor."""
+        content = self.get_nodegraph_script()
+        if content:
+            self.text_edit.setPlainText(content)
 
     def load_root_into_editor(self):
         """Load the root Nuke script path into the editor if available."""
@@ -364,6 +370,59 @@ class NkScriptEditor(QtWidgets.QWidget):
         if file_path:
             self.file_path_lineedit.setText(file_path)
             self.load_nk_file_into_editor()
+
+    def _move_cursor_to_error_line(self, add_debug_point=False):
+        """
+        Estimate the line number where nodePaste failed by comparing the partial
+        nodegraph script with the full text editor content, starting from 'Root {'.
+
+        Moves the text cursor to that approximate error line.
+
+        Returns:
+            int: The last loaded line number.
+
+        TODO:
+            Instead of compare directly, get the last loaded node with Regex.
+            Find that node in the text editor and set the cursor to the next line.
+        """
+        error_script = self.get_nodegraph_script()
+        error_lines = error_script.splitlines()
+
+        # Find the Root start
+        try:
+            root_index_error = next(i for i, l in enumerate(error_lines) if "Root {" in l)
+        except StopIteration:
+            logger.warning("'Root {' not found in error script.")
+            return
+
+        # Find number of lines after root
+        error_lines_after_root = error_lines[root_index_error:]
+        num_valid_lines = len(error_lines_after_root) - 1
+
+        # Obtener el texto actual en el editor
+        full_text = self.text_edit.toPlainText()
+        full_lines = full_text.splitlines()
+
+        try:
+            root_index_editor = next(i for i, l in enumerate(full_lines) if "Root {" in l)
+        except StopIteration:
+            logger.warning("'Root {' not found in text editor.")
+            return
+
+        # Last valid line
+        target_line = root_index_editor + num_valid_lines
+
+        block = self.text_edit.document().findBlockByLineNumber(target_line)
+        if block.isValid():
+            cursor = self.text_edit.textCursor()
+            cursor.setPosition(block.position())
+            self.text_edit.setTextCursor(cursor)
+            self.text_edit.setFocus()
+            if add_debug_point:
+                self.text_edit.add_debug_point(target_line)
+                self.text_edit.set_active_debug_point(target_line)
+        return target_line
+
 
     def _paste_plain_text(self, script, clean_nodegraph=False):
         """
@@ -396,9 +455,10 @@ class NkScriptEditor(QtWidgets.QWidget):
             # Load clipboard in Nuke
             try:
                 nuke.nodePaste("%clipboard%")
-                # TODO look for errors on paste and move the cursor to the line
             except Exception as e:
                 logger.error(f"Error on script paste: {e}")
+                # TODO look for errors on paste and move the cursor to the line
+                # self._move_cursor_to_error_line(add_debug_point=True)
 
             # Restore backup
             clipboard.setMimeData(backup)

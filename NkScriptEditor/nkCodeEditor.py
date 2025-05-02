@@ -29,17 +29,29 @@ else:
 import sys
 
 class LineNumberArea(QtWidgets.QWidget):
+    """
+    Widget displayed to the left of the text editor to show line numbers and breakpoints.
+
+    Clicking on a line number toggles a breakpoint. Active debug points are visually highlighted.
+    """
     def __init__(self, editor):
         super().__init__(editor)
         self.code_editor = editor
 
     def sizeHint(self):
+        """Return the preferred width of the line number area."""
         return QSize(self.code_editor.line_number_area_width(), 0)
 
     def paintEvent(self, event):
+        """Delegate painting of line numbers to the parent CodeEditor."""
         self.code_editor.line_number_area_paint_event(event)
 
     def mousePressEvent(self, event):
+        """
+        Handle mouse clicks in the line number area.
+
+        Clicking toggles breakpoints and updates the active debug point.
+        """
         if event.button() == QtCore.Qt.LeftButton:
             editor = self.code_editor
             y = event.pos().y()
@@ -67,6 +79,15 @@ class LineNumberArea(QtWidgets.QWidget):
 
 
 class CodeEditor(QtWidgets.QPlainTextEdit):
+    """
+    Custom text editor for displaying and editing Nuke .nk scripts with debugging support.
+
+    Features:
+    - Line numbers and breakpoint display
+    - Highlighting of the current line and active debug line
+    - Cursor navigation to breakpoints
+    - Automatic update of breakpoint positions when editing
+    """
     def __init__(self):
         super().__init__()
         self.line_number_area = LineNumberArea(self)
@@ -208,6 +229,21 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
 
         # Update our snapshot for the next edit
         self._last_text = new_text
+
+    def add_debug_point(self, line):
+        """Adds a debug point to the line given."""
+        self.breakpoint_lines.add(line)
+
+    def set_active_debug_point(self, line):
+        """
+        Sets the given line like active breakpoint if 
+        that line have an existing breakpoint.
+        """
+        if line in self.breakpoint_lines:
+            self.active_debug_point = line
+        else:
+            logger.error(f"The line {line} is not in the breakpoint line list. "
+                         f"It can not be an active breakpoint.")
 
     def get_all_debug_points(self):
         """Return all currently defined debug points in sorted order.

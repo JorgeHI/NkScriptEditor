@@ -1,10 +1,34 @@
+# -----------------------------------------------------------------------------
+# Nk Script Editor for Nuke
+# Copyright (c) 2025 Jorge Hernandez Ibañez
+#
+# This file is part of the Nk Script Editor project.
+# Repository: https://github.com/JorgeHI/NkScriptEditor
+#
+# This software is licensed under the MIT License.
+# See the LICENSE file in the root of this repository for details.
+# -----------------------------------------------------------------------------
 import logging
 
 from NkScriptEditor import nkConstants
 
 class NukeHandler(logging.Handler):
-    """Custom logging handler that prints to Nuke's Script Editor via print()"""
+    """
+    Custom logging handler that outputs log messages to Nuke's Script Editor.
+
+    This handler uses the standard 'print()' function so that messages appear
+    inside Nuke's internal script editor panel.
+
+    Inherits from:
+        logging.Handler
+    """
     def emit(self, record):
+        """
+        Emit a log record by formatting it and printing to stdout.
+
+        Args:
+            record (logging.LogRecord): The log record to output.
+        """
         try:
             msg = self.format(record)
             print(msg)
@@ -12,6 +36,20 @@ class NukeHandler(logging.Handler):
             pass
 
 def getLogger(module_name):
+    """
+    Creates and configures a logger instance for the given module name.
+
+    The logger is configured with:
+      - A standard stream handler that outputs to the console.
+      - A custom NukeHandler that prints to Nuke's Script Editor.
+      - A consistent formatter with time, level, and module info.
+
+    Args:
+        module_name (str): The name of the module using the logger.
+
+    Returns:
+        logging.Logger: A configured logger instance for use.
+    """
     # Create a logger for this module
     logger = logging.getLogger(module_name)
     logger.setLevel(nkConstants.logging_level)  # Set minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
