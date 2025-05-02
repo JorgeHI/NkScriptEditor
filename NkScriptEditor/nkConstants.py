@@ -12,7 +12,7 @@ import logging
 import os
 
 # Tool mode
-dev_mode = True
+dev_mode = False
 logging_level = logging.DEBUG if dev_mode else logging.WARNING
 
 # Tool paths
