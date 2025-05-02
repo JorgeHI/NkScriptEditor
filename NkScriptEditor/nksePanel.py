@@ -5,7 +5,7 @@
 # This file is part of the Nk Script Editor project.
 # Repository: https://github.com/JorgeHI/NkScriptEditor
 #
-# This software is licensed under the MIT License.
+# This file is licensed under the GNU General Public License v3.0.
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
 import os
@@ -40,7 +40,7 @@ class NkScriptEditor(QtWidgets.QWidget):
     This tool provides an integrated editor for viewing and editing `.nk` files
     with syntax highlighting, breakpoint navigation, and script management capabilities.
     It features:
-    - Live loading of nodegraph or `.nk` file paths
+    - Live loading of nodegraph or '.nk' file paths
     - A custom syntax highlighter for key Nuke script elements
     - Debugging support with clickable breakpoints and playback slicing
     - Configurable preferences, including color and bold styles for syntax elements
