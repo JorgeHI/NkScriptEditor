@@ -28,7 +28,7 @@ Jump bettwen break points ad find the problem in your script quickly like you wi
 
 ![image](https://github.com/user-attachments/assets/96d83dd9-88f2-4a81-b9a8-f5bf011b4fbf)
 
-Customiza the highlighting and the wrap text mode and save your preference locally.
+Customize the highlighting and the wrap text mode and save your preference locally.
 
 ## Help Tab
 
