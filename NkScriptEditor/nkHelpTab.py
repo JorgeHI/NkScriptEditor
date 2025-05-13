@@ -12,6 +12,7 @@ import nuke
 import nukescripts
 from NkScriptEditor import nkUtils
 from NkScriptEditor import version as nkseVersion
+from NkScriptEditor import nkConstants
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -37,14 +38,24 @@ class HelpTabWidget(QtWidgets.QWidget):
         group_box = QtWidgets.QGroupBox("Nk Script Editor")
         group_layout = QtWidgets.QVBoxLayout(group_box)
 
+        info_layout = QtWidgets.QHBoxLayout(group_box)
+
+        # Tool icon
+        nkse_label = QtWidgets.QLabel()
+        pixmap = QtGui.QPixmap(nkConstants.icons.nkse)
+        nkse_label.setPixmap(pixmap)
+        nkse_label.setScaledContents(False)
+        nkse_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        info_layout.addWidget(nkse_label)
         # Info label
         info_label = QtWidgets.QLabel(
             f'<b>Nk Script Editor v{nkseVersion}</b> - Tool developed by Jorge Hernandez Ibañez (JorgeHI)<br>'
             f'<span style="color: gray;">For assistance or bug report contact: info@jorgehi.com</span>'
         )
         info_label.setWordWrap(True)
-        group_layout.addWidget(info_label)
 
+        info_layout.addWidget(info_label)
+        group_layout.addLayout(info_layout)
         # Horizontal layout for buttons
         buttons_layout = QtWidgets.QHBoxLayout()
 

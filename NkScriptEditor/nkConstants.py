@@ -19,6 +19,7 @@ logging_level = logging.DEBUG if dev_mode else logging.WARNING
 home_dir = os.path.expanduser("~")
 config_dir = os.path.join(home_dir, ".nuke", "NkScriptEditor")
 pref_filepath = os.path.join(config_dir, "preferences.pref")
+code_dir = os.path.dirname(__file__)
 
 # others
 encodings = [
@@ -43,3 +44,9 @@ class nkRegex:
         r"afterFrameRender|afterRender|afterBackgroundRender|afterBackgroundFrameRender|"
         r"filenameFilter|validateFilename|autoSaveFilter|autoSaveRestoreFilter)\s"
     )
+
+class icons:
+    icons_dir = os.path.join(code_dir, "icons")
+
+    open_folder = os.path.join(icons_dir, "open_folder.png")
+    nkse = os.path.join(icons_dir, "nkse_low.png")
