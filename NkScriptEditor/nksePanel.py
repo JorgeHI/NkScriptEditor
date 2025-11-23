@@ -21,6 +21,7 @@ from NkScriptEditor import nkHelpTab
 from NkScriptEditor import nkConstants
 from NkScriptEditor import nkUtils
 from NkScriptEditor import nkParser
+from NkScriptEditor import nkDiffViewer
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -185,14 +186,18 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_layout.addStretch()
         editor_layout.addLayout(self.debug_layout)
 
-        # -- Paste / Save controls
+        # -- Paste / Save / Compare controls
         self.save_layout = QtWidgets.QHBoxLayout()
         self.paste_button = QtWidgets.QPushButton("Paste Script")
         self.paste_button.clicked.connect(self.paste_script)
         self.saveas_button = QtWidgets.QPushButton("Save Script")
         self.saveas_button.clicked.connect(self.save_script)
+        self.compare_button = QtWidgets.QPushButton("Compare...")
+        self.compare_button.setToolTip("Compare current script with another .nk file")
+        self.compare_button.clicked.connect(self.show_diff_viewer)
         self.save_layout.addWidget(self.paste_button)
         self.save_layout.addWidget(self.saveas_button)
+        self.save_layout.addWidget(self.compare_button)
         editor_layout.addLayout(self.save_layout)
 
         # Add the Editor page to the tabs
@@ -614,3 +619,34 @@ class NkScriptEditor(QtWidgets.QWidget):
                 msg = f"Error saving script: {e}"
                 logger.error(msg)
                 nuke.message(msg)
+
+    def show_diff_viewer(self):
+        """
+        Open the diff viewer dialog to compare the current script with another file.
+
+        The diff viewer shows a side-by-side comparison with:
+        - Green highlighting for added lines
+        - Red highlighting for deleted lines
+        - Yellow highlighting for modified lines
+        - Navigation buttons to jump between differences
+        """
+        current_text = self.text_edit.toPlainText()
+        if not current_text.strip():
+            nuke.message("No script loaded in the editor.\n\n"
+                         "Load a script first before comparing.")
+            return
+
+        # Determine title based on loaded file path
+        file_path = self.file_path_lineedit.text()
+        if file_path:
+            current_title = os.path.basename(file_path)
+        else:
+            current_title = "Current Script"
+
+        # Show the diff dialog
+        self.diff_dialog = nkDiffViewer.show_diff_dialog(
+            self,
+            current_text=current_text,
+            current_title=current_title
+        )
+        logger.debug("Diff viewer opened")
