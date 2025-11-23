@@ -186,7 +186,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_layout.addStretch()
         editor_layout.addLayout(self.debug_layout)
 
-        # -- Paste / Save / Compare controls
+        # -- Paste / Save / Compare / Validate controls
         self.save_layout = QtWidgets.QHBoxLayout()
         self.paste_button = QtWidgets.QPushButton("Paste Script")
         self.paste_button.clicked.connect(self.paste_script)
@@ -195,9 +195,17 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.compare_button = QtWidgets.QPushButton("Compare...")
         self.compare_button.setToolTip("Compare current script with another .nk file")
         self.compare_button.clicked.connect(self.show_diff_viewer)
+        self.validate_button = QtWidgets.QPushButton("Validate")
+        self.validate_button.setToolTip("Check script structure for errors (unmatched braces, etc.)")
+        self.validate_button.clicked.connect(self.validate_script)
+        self.validation_status_label = QtWidgets.QLabel("")
+        self.validation_status_label.setStyleSheet("color: gray;")
         self.save_layout.addWidget(self.paste_button)
         self.save_layout.addWidget(self.saveas_button)
         self.save_layout.addWidget(self.compare_button)
+        self.save_layout.addWidget(self.validate_button)
+        self.save_layout.addWidget(self.validation_status_label)
+        self.save_layout.addStretch()
         editor_layout.addLayout(self.save_layout)
 
         # Add the Editor page to the tabs
@@ -345,6 +353,8 @@ class NkScriptEditor(QtWidgets.QWidget):
                     self.text_edit.setPlainText(content)
                     # Clear any previous error markers when loading new content
                     self.text_edit.clear_error_line()
+                    # Auto-validate on load
+                    self.validate_script(show_success_message=False)
             except Exception as e:
                 msg = f"Nk file could not be loaded:\n{e}"
                 logger.error(msg)
@@ -381,6 +391,8 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.text_edit.setPlainText(content)
             # Clear any previous error markers when loading new content
             self.text_edit.clear_error_line()
+            # Auto-validate on load
+            self.validate_script(show_success_message=False)
 
     def load_root_into_editor(self):
         """Load the root Nuke script path into the editor if available."""
@@ -650,3 +662,45 @@ class NkScriptEditor(QtWidgets.QWidget):
             current_title=current_title
         )
         logger.debug("Diff viewer opened")
+
+    def validate_script(self, show_success_message=True):
+        """
+        Validate the current script structure and display results.
+
+        Checks for:
+        - Unmatched braces (unclosed or extra closing braces)
+        - Malformed node definitions
+        - Duplicate node names
+
+        Args:
+            show_success_message (bool): Whether to show a message when no errors found
+        """
+        current_text = self.text_edit.toPlainText()
+        if not current_text.strip():
+            self.validation_status_label.setText("")
+            self.text_edit.clear_validation_errors()
+            return
+
+        # Run validation
+        errors = self.text_edit.validate_structure()
+        error_count, warning_count = self.text_edit.get_validation_error_count()
+
+        # Update status label
+        if error_count > 0 or warning_count > 0:
+            status_parts = []
+            if error_count > 0:
+                status_parts.append(f"{error_count} error{'s' if error_count > 1 else ''}")
+            if warning_count > 0:
+                status_parts.append(f"{warning_count} warning{'s' if warning_count > 1 else ''}")
+            status_text = ", ".join(status_parts)
+            self.validation_status_label.setText(status_text)
+            self.validation_status_label.setStyleSheet(
+                "color: #ff5050;" if error_count > 0 else "color: #dca030;"
+            )
+            logger.info(f"Validation: {status_text}")
+        else:
+            self.validation_status_label.setText("Valid")
+            self.validation_status_label.setStyleSheet("color: #50c050;")
+            if show_success_message:
+                nuke.message("Script structure is valid.\n\nNo errors found.")
+            logger.info("Validation: No errors found")

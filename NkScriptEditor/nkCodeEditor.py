@@ -9,6 +9,7 @@
 # See the LICENSE file in the root of this repository for details.
 # -----------------------------------------------------------------------------
 from NkScriptEditor import nkUtils
+from NkScriptEditor import nkValidator
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -86,6 +87,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
     - Line numbers and breakpoint display
     - Highlighting of the current line and active debug line
     - Error line highlighting for failed script loads
+    - Structure validation with error markers and underlines
     - Cursor navigation to breakpoints
     - Automatic update of breakpoint positions when editing
     """
@@ -97,12 +99,17 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.breakpoint_lines = set()
         self.active_debug_point = None
-        self.error_line = None  # Line with detected error
+        self.error_line = None  # Line with detected error (from paste failure)
+        self.validation_errors = {}  # Dict of line_number -> list[StructureError]
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
         self._last_text = self.toPlainText()
         self.document().contentsChange.connect(self._on_contents_change)
+
+        # Enable mouse tracking for tooltips
+        self.setMouseTracking(True)
+        self.line_number_area.setMouseTracking(True)
 
     def line_number_area_width(self):
         """Calculate and return the width required for the line number area.
@@ -148,21 +155,38 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             if block.isVisible() and bottom >= event.rect().top():
                 line_num = block_number + 1
 
-                # Highlight error line with a red tint (highest priority)
+                # Check for validation errors on this line
+                has_validation_error = line_num in self.validation_errors
+                has_error_severity = False
+                if has_validation_error:
+                    has_error_severity = any(
+                        e.severity == nkValidator.StructureError.ERROR
+                        for e in self.validation_errors[line_num]
+                    )
+
+                # Highlight error line with a red tint (highest priority - paste errors)
                 if line_num == self.error_line:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
                                      int(self.fontMetrics().height()), QtGui.QColor(120, 40, 40))
+                # Highlight validation errors (structure errors)
+                elif has_validation_error and has_error_severity:
+                    painter.fillRect(0, int(top), self.line_number_area.width(),
+                                     int(self.fontMetrics().height()), QtGui.QColor(100, 50, 50))
                 # Highlight active debug point line with a soft yellow
                 elif line_num == self.active_debug_point:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
                                      int(self.fontMetrics().height()), QtGui.QColor(90, 90, 50))
+                # Highlight validation warnings
+                elif has_validation_error:
+                    painter.fillRect(0, int(top), self.line_number_area.width(),
+                                     int(self.fontMetrics().height()), QtGui.QColor(90, 70, 30))
 
                 number = str(line_num)
                 painter.setPen(QtCore.Qt.black)
                 painter.drawText(0, int(top), self.line_number_area.width() - 5, self.fontMetrics().height(),
                                  QtCore.Qt.AlignRight, number)
 
-                # Draw error marker (X icon) - highest priority
+                # Draw error marker (X icon) - highest priority (paste error)
                 if line_num == self.error_line:
                     center_x = 10
                     center_y = int(top) + self.fontMetrics().height() / 2
@@ -172,6 +196,27 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                                      center_x + size, int(center_y) + size)
                     painter.drawLine(center_x - size, int(center_y) + size,
                                      center_x + size, int(center_y) - size)
+                # Draw validation error marker (! icon)
+                elif has_validation_error and has_error_severity:
+                    center_x = 10
+                    center_y = int(top) + self.fontMetrics().height() / 2
+                    painter.setPen(QtGui.QPen(QtGui.QColor(255, 80, 80), 2))
+                    # Draw exclamation mark
+                    painter.drawLine(center_x, int(center_y) - 5, center_x, int(center_y) + 1)
+                    painter.drawPoint(center_x, int(center_y) + 4)
+                # Draw validation warning marker (triangle)
+                elif has_validation_error:
+                    center_x = 10
+                    center_y = int(top) + self.fontMetrics().height() / 2
+                    painter.setPen(QtGui.QPen(QtGui.QColor(220, 180, 50), 2))
+                    painter.setBrush(QtCore.Qt.NoBrush)
+                    # Draw small triangle
+                    points = [
+                        QtCore.QPoint(center_x, int(center_y) - 5),
+                        QtCore.QPoint(center_x - 5, int(center_y) + 4),
+                        QtCore.QPoint(center_x + 5, int(center_y) + 4),
+                    ]
+                    painter.drawPolygon(points)
                 # Draw breakpoint (red circle)
                 elif line_num in self.breakpoint_lines:
                     radius = 5
@@ -189,7 +234,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
     def highlight_current_line(self):
         extra_selections = []
 
-        # Highlight error line with red background (highest priority)
+        # Highlight error line with red background (highest priority - paste error)
         if self.error_line is not None:
             error_selection = QtWidgets.QTextEdit.ExtraSelection()
             error_color = QtGui.QColor(100, 30, 30)  # Dark red
@@ -200,6 +245,39 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 error_selection.cursor = QtGui.QTextCursor(block)
                 error_selection.cursor.clearSelection()
                 extra_selections.append(error_selection)
+
+        # Add underlines for validation errors
+        for line_num, errors in self.validation_errors.items():
+            block = self.document().findBlockByNumber(line_num - 1)
+            if block.isValid():
+                for err in errors:
+                    selection = QtWidgets.QTextEdit.ExtraSelection()
+
+                    # Set underline style based on severity
+                    if err.severity == nkValidator.StructureError.ERROR:
+                        selection.format.setUnderlineColor(QtGui.QColor(255, 80, 80))
+                    else:
+                        selection.format.setUnderlineColor(QtGui.QColor(220, 180, 50))
+
+                    selection.format.setUnderlineStyle(QtGui.QTextCharFormat.WaveUnderline)
+
+                    # Position cursor at error location
+                    cursor = QtGui.QTextCursor(block)
+                    cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
+
+                    # Move to error column
+                    for _ in range(min(err.column, block.length() - 1)):
+                        cursor.movePosition(QtGui.QTextCursor.Right)
+
+                    # Select the error length (or rest of line if longer)
+                    chars_to_select = min(err.length, block.length() - err.column - 1)
+                    if chars_to_select < 1:
+                        chars_to_select = max(1, block.length() - 1)
+                    for _ in range(chars_to_select):
+                        cursor.movePosition(QtGui.QTextCursor.Right, QtGui.QTextCursor.KeepAnchor)
+
+                    selection.cursor = cursor
+                    extra_selections.append(selection)
 
         # Highlight current cursor line
         if not self.isReadOnly():
@@ -399,3 +477,99 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             self.active_debug_point = prev_point
             self.move_cursor_to_line(prev_point)
             self.line_number_area.update()
+
+    # -------------------------------------------------------------------------
+    # Validation Methods
+    # -------------------------------------------------------------------------
+
+    def validate_structure(self):
+        """
+        Run structure validation on the current script content.
+
+        Validates brace matching and node definitions, updating the
+        validation_errors dictionary and refreshing the display.
+
+        Returns:
+            list[StructureError]: List of errors found
+        """
+        script_text = self.toPlainText()
+        errors = nkValidator.validate_script(script_text)
+        self.validation_errors = nkValidator.get_errors_by_line(errors)
+
+        # Refresh display
+        self.line_number_area.update()
+        self.highlight_current_line()
+
+        logger.debug(f"Validation complete: {len(errors)} errors found")
+        return errors
+
+    def set_validation_errors(self, errors):
+        """
+        Set validation errors from an external source.
+
+        Args:
+            errors (list[StructureError]): List of validation errors
+        """
+        self.validation_errors = nkValidator.get_errors_by_line(errors)
+        self.line_number_area.update()
+        self.highlight_current_line()
+
+    def clear_validation_errors(self):
+        """Clear all validation errors."""
+        self.validation_errors = {}
+        self.line_number_area.update()
+        self.highlight_current_line()
+        logger.debug("Validation errors cleared")
+
+    def get_validation_error_count(self):
+        """
+        Get the total count of validation errors.
+
+        Returns:
+            tuple: (error_count, warning_count)
+        """
+        error_count = 0
+        warning_count = 0
+        for errors in self.validation_errors.values():
+            for err in errors:
+                if err.severity == nkValidator.StructureError.ERROR:
+                    error_count += 1
+                else:
+                    warning_count += 1
+        return error_count, warning_count
+
+    def get_error_at_line(self, line_number):
+        """
+        Get validation errors at a specific line.
+
+        Args:
+            line_number (int): 1-based line number
+
+        Returns:
+            list[StructureError]: List of errors at that line, empty if none
+        """
+        return self.validation_errors.get(line_number, [])
+
+    def event(self, event):
+        """Handle events including tooltips for validation errors."""
+        if event.type() == QtCore.QEvent.ToolTip:
+            # Get position in document
+            pos = event.pos()
+            cursor = self.cursorForPosition(pos)
+            line_num = cursor.blockNumber() + 1
+
+            # Check for validation errors on this line
+            errors = self.get_error_at_line(line_num)
+            if errors:
+                # Build tooltip text from all errors on this line
+                tooltip_lines = []
+                for err in errors:
+                    severity = "Error" if err.severity == nkValidator.StructureError.ERROR else "Warning"
+                    tooltip_lines.append(f"[{severity}] {err.message}")
+                tooltip_text = "\n".join(tooltip_lines)
+                QtWidgets.QToolTip.showText(event.globalPos(), tooltip_text, self)
+                return True
+            else:
+                QtWidgets.QToolTip.hideText()
+
+        return super().event(event)
