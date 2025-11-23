@@ -10,6 +10,7 @@
 # -----------------------------------------------------------------------------
 from NkScriptEditor import nkUtils
 from NkScriptEditor import nkValidator
+from NkScriptEditor import nkCompleter
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -110,6 +111,10 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         # Enable mouse tracking for tooltips
         self.setMouseTracking(True)
         self.line_number_area.setMouseTracking(True)
+
+        # Autocomplete manager
+        self.autocomplete = nkCompleter.AutocompleteManager(self)
+        self.autocomplete_enabled = True
 
     def line_number_area_width(self):
         """Calculate and return the width required for the line number area.
@@ -549,6 +554,57 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             list[StructureError]: List of errors at that line, empty if none
         """
         return self.validation_errors.get(line_number, [])
+
+    # -------------------------------------------------------------------------
+    # Autocomplete Methods
+    # -------------------------------------------------------------------------
+
+    def set_autocomplete_enabled(self, enabled):
+        """
+        Enable or disable autocomplete.
+
+        Args:
+            enabled (bool): Whether autocomplete should be enabled
+        """
+        self.autocomplete_enabled = enabled
+        if not enabled:
+            self.autocomplete.hide_popup()
+        logger.debug(f"Autocomplete {'enabled' if enabled else 'disabled'}")
+
+    def trigger_autocomplete(self):
+        """Manually trigger the autocomplete popup."""
+        if self.autocomplete_enabled:
+            self.autocomplete.show_completions()
+
+    def keyPressEvent(self, event):
+        """Handle key press events including autocomplete triggers."""
+        # Let autocomplete handle navigation keys when popup is visible
+        if self.autocomplete_enabled and self.autocomplete.handle_key_press(event):
+            return
+
+        # Ctrl+Space to manually trigger autocomplete
+        if (event.key() == QtCore.Qt.Key_Space and
+                event.modifiers() == QtCore.Qt.ControlModifier):
+            self.autocomplete.show_completions()
+            return
+
+        # Call base implementation
+        super().keyPressEvent(event)
+
+        # After typing, check if we should show completions
+        if self.autocomplete_enabled:
+            # Show completions on alphanumeric keys
+            if event.text() and event.text().isalnum():
+                self.autocomplete.show_completions()
+            # Hide on certain keys
+            elif event.key() in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Return,
+                                 QtCore.Qt.Key_Backspace, QtCore.Qt.Key_Escape):
+                self.autocomplete.hide_popup()
+
+    def focusOutEvent(self, event):
+        """Hide autocomplete popup when editor loses focus."""
+        self.autocomplete.hide_popup()
+        super().focusOutEvent(event)
 
     def event(self, event):
         """Handle events including tooltips for validation errors."""
