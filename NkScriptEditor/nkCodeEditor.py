@@ -85,6 +85,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
     Features:
     - Line numbers and breakpoint display
     - Highlighting of the current line and active debug line
+    - Error line highlighting for failed script loads
     - Cursor navigation to breakpoints
     - Automatic update of breakpoint positions when editing
     """
@@ -96,6 +97,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.breakpoint_lines = set()
         self.active_debug_point = None
+        self.error_line = None  # Line with detected error
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
@@ -146,22 +148,38 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             if block.isVisible() and bottom >= event.rect().top():
                 line_num = block_number + 1
 
+                # Highlight error line with a red tint (highest priority)
+                if line_num == self.error_line:
+                    painter.fillRect(0, int(top), self.line_number_area.width(),
+                                     int(self.fontMetrics().height()), QtGui.QColor(120, 40, 40))
                 # Highlight active debug point line with a soft yellow
-                if line_num == self.active_debug_point:
-                    painter.fillRect(0, int(top), self.line_number_area.width(), int(self.fontMetrics().height()), QtGui.QColor(90, 90, 50))
+                elif line_num == self.active_debug_point:
+                    painter.fillRect(0, int(top), self.line_number_area.width(),
+                                     int(self.fontMetrics().height()), QtGui.QColor(90, 90, 50))
 
                 number = str(line_num)
                 painter.setPen(QtCore.Qt.black)
                 painter.drawText(0, int(top), self.line_number_area.width() - 5, self.fontMetrics().height(),
                                  QtCore.Qt.AlignRight, number)
 
-                # Draw breakpoint
-                if line_num in self.breakpoint_lines:
+                # Draw error marker (X icon) - highest priority
+                if line_num == self.error_line:
+                    center_x = 10
+                    center_y = int(top) + self.fontMetrics().height() / 2
+                    painter.setPen(QtGui.QPen(QtGui.QColor(255, 100, 100), 2))
+                    size = 4
+                    painter.drawLine(center_x - size, int(center_y) - size,
+                                     center_x + size, int(center_y) + size)
+                    painter.drawLine(center_x - size, int(center_y) + size,
+                                     center_x + size, int(center_y) - size)
+                # Draw breakpoint (red circle)
+                elif line_num in self.breakpoint_lines:
                     radius = 5
                     center_x = 10
                     center_y = int(top) + self.fontMetrics().height() / 2
                     painter.setBrush(QtCore.Qt.red)
-                    painter.drawEllipse(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+                    painter.setPen(QtCore.Qt.NoPen)
+                    painter.drawEllipse(center_x - radius, int(center_y) - radius, 2 * radius, 2 * radius)
 
             block = block.next()
             top = bottom
@@ -170,6 +188,20 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
 
     def highlight_current_line(self):
         extra_selections = []
+
+        # Highlight error line with red background (highest priority)
+        if self.error_line is not None:
+            error_selection = QtWidgets.QTextEdit.ExtraSelection()
+            error_color = QtGui.QColor(100, 30, 30)  # Dark red
+            error_selection.format.setBackground(error_color)
+            error_selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            block = self.document().findBlockByNumber(self.error_line - 1)
+            if block.isValid():
+                error_selection.cursor = QtGui.QTextCursor(block)
+                error_selection.cursor.clearSelection()
+                extra_selections.append(error_selection)
+
+        # Highlight current cursor line
         if not self.isReadOnly():
             selection = QtWidgets.QTextEdit.ExtraSelection()
             line_color = QtGui.QColor(78, 78, 78)
@@ -178,6 +210,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
             extra_selections.append(selection)
+
         self.setExtraSelections(extra_selections)
 
     def _on_contents_change(self, position, chars_removed, chars_added):
@@ -323,6 +356,25 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             cursor = QtGui.QTextCursor(block)
             self.setTextCursor(cursor)
             self.centerCursor()
+
+    def set_error_line(self, line_number):
+        """
+        Set an error marker at the specified line.
+
+        Args:
+            line_number (int): The 1-based line number to mark as error
+        """
+        self.error_line = line_number
+        self.line_number_area.update()
+        self.highlight_current_line()  # Refresh highlighting
+        logger.debug(f"Error line set to {line_number}")
+
+    def clear_error_line(self):
+        """Clear the error line marker."""
+        self.error_line = None
+        self.line_number_area.update()
+        self.highlight_current_line()  # Refresh highlighting
+        logger.debug("Error line cleared")
 
     def set_next_debug_point(self):
         """Set the active debug point to the next one and move the cursor to that line.

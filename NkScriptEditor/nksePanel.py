@@ -20,6 +20,7 @@ from NkScriptEditor import nkPreferences
 from NkScriptEditor import nkHelpTab
 from NkScriptEditor import nkConstants
 from NkScriptEditor import nkUtils
+from NkScriptEditor import nkParser
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -337,6 +338,8 @@ class NkScriptEditor(QtWidgets.QWidget):
                 with open(file_path, 'r', encoding=selected_encoding) as f:
                     content = f.read()
                     self.text_edit.setPlainText(content)
+                    # Clear any previous error markers when loading new content
+                    self.text_edit.clear_error_line()
             except Exception as e:
                 msg = f"Nk file could not be loaded:\n{e}"
                 logger.error(msg)
@@ -371,6 +374,8 @@ class NkScriptEditor(QtWidgets.QWidget):
         content = self.get_nodegraph_script()
         if content:
             self.text_edit.setPlainText(content)
+            # Clear any previous error markers when loading new content
+            self.text_edit.clear_error_line()
 
     def load_root_into_editor(self):
         """Load the root Nuke script path into the editor if available."""
@@ -379,69 +384,136 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.file_path_lineedit.setText(file_path)
             self.load_nk_file_into_editor()
 
-    def _move_cursor_to_error_line(self, add_debug_point=False):
+    def _get_existing_node_names(self):
         """
-        Estimate the line number where nodePaste failed by comparing the partial
-        nodegraph script with the full text editor content, starting from 'Root {'.
-
-        Moves the text cursor to that approximate error line.
+        Get the names of all nodes currently existing in the Nuke nodegraph.
 
         Returns:
-            int: The last loaded line number.
-
-        TODO:
-            Instead of compare directly, get the last loaded node with Regex.
-            Find that node in the text editor and set the cursor to the next line.
+            set[str]: A set of node names currently in Nuke.
         """
-        error_script = self.get_nodegraph_script()
-        error_lines = error_script.splitlines()
-
-        # Find the Root start
         try:
-            root_index_error = next(i for i, l in enumerate(error_lines) if "Root {" in l)
-        except StopIteration:
-            logger.warning("'Root {' not found in error script.")
-            return
+            return {node.name() for node in nuke.allNodes(recurseGroups=True)}
+        except Exception as e:
+            logger.error(f"Error getting existing nodes: {e}")
+            return set()
 
-        # Find number of lines after root
-        error_lines_after_root = error_lines[root_index_error:]
-        num_valid_lines = len(error_lines_after_root) - 1
+    def _detect_error_line(self, script_text, error_message=None, nodes_before_paste=None):
+        """
+        Detect the line where a script load/paste operation failed.
 
-        # Obtener el texto actual en el editor
-        full_text = self.text_edit.toPlainText()
-        full_lines = full_text.splitlines()
+        This method uses multiple strategies to identify the error location:
+        1. Parse the error message for explicit line numbers
+        2. Compare nodes that existed before/after paste to find the last loaded node
+        3. Find the first node that failed to load
 
+        Args:
+            script_text (str): The full script that was being loaded
+            error_message (str, optional): The error message from Nuke, if any
+            nodes_before_paste (set[str], optional): Node names that existed before paste
+
+        Returns:
+            tuple: (error_line, error_info) where error_line is the 1-based line number
+                   and error_info is a string describing what was detected
+        """
+        # Strategy 1: Try to parse line number from error message
+        if error_message:
+            line_from_error = nkParser.parse_error_line_from_message(str(error_message))
+            if line_from_error:
+                logger.debug(f"Found line {line_from_error} from error message")
+                return (line_from_error, f"Error reported at line {line_from_error}")
+
+        # Strategy 2 & 3: Compare nodes
         try:
-            root_index_editor = next(i for i, l in enumerate(full_lines) if "Root {" in l)
-        except StopIteration:
-            logger.warning("'Root {' not found in text editor.")
-            return
+            # Parse all nodes from the script
+            script_nodes = nkParser.parse_nk_script(script_text)
+            if not script_nodes:
+                logger.warning("No nodes found in script")
+                return (1, "Could not parse script nodes")
 
-        # Last valid line
-        target_line = root_index_editor + num_valid_lines
+            # Get current nodes in Nuke
+            current_nodes = self._get_existing_node_names()
 
-        block = self.text_edit.document().findBlockByLineNumber(target_line)
+            # If we have nodes_before_paste, find newly created nodes
+            if nodes_before_paste is not None:
+                new_nodes = current_nodes - nodes_before_paste
+                logger.debug(f"New nodes created: {new_nodes}")
+            else:
+                new_nodes = current_nodes
+
+            # Find the first node that failed to load
+            first_missing = nkParser.find_first_missing_node(script_nodes, current_nodes)
+            if first_missing:
+                logger.debug(f"First missing node: {first_missing}")
+                return (first_missing.start_line,
+                        f"Node '{first_missing.name}' ({first_missing.node_type}) failed to load")
+
+            # Find the last node that was successfully loaded
+            last_loaded = nkParser.find_last_matching_node(script_nodes, current_nodes)
+            if last_loaded:
+                # Error is likely right after the last loaded node
+                error_line = last_loaded.end_line + 1
+                logger.debug(f"Last loaded node: {last_loaded}, error at line {error_line}")
+                return (error_line,
+                        f"Error after node '{last_loaded.name}' (line {error_line})")
+
+        except Exception as e:
+            logger.error(f"Error during node comparison: {e}")
+
+        # Fallback: return line 1
+        return (1, "Could not determine error location")
+
+    def _move_cursor_to_error_line(self, line_number, add_debug_point=False, error_info=None):
+        """
+        Move the cursor to a specific line number and optionally add a debug point.
+
+        Args:
+            line_number (int): The 1-based line number to move to
+            add_debug_point (bool): Whether to add a breakpoint at this line
+            error_info (str, optional): Description of the error to display
+
+        Returns:
+            int: The line number that was navigated to
+        """
+        if line_number is None or line_number < 1:
+            line_number = 1
+
+        # Ensure line number doesn't exceed document
+        max_line = self.text_edit.document().blockCount()
+        if line_number > max_line:
+            line_number = max_line
+
+        # Move cursor to the error line
+        block = self.text_edit.document().findBlockByNumber(line_number - 1)
         if block.isValid():
             cursor = self.text_edit.textCursor()
             cursor.setPosition(block.position())
             self.text_edit.setTextCursor(cursor)
+            self.text_edit.centerCursor()
             self.text_edit.setFocus()
+
             if add_debug_point:
-                self.text_edit.add_debug_point(target_line)
-                self.text_edit.set_active_debug_point(target_line)
-        return target_line
+                self.text_edit.add_debug_point(line_number)
+                self.text_edit.set_active_debug_point(line_number)
+
+            logger.info(f"Cursor moved to line {line_number}")
+
+        return line_number
 
 
     def _paste_plain_text(self, script, clean_nodegraph=False):
         """
         Paste the given plain text script into Nuke.
 
+        If an error occurs during paste, this method will detect the error location
+        and move the cursor to the problematic line, adding a debug point for easy
+        navigation.
+
         Args:
             script (str): Nuke script as plain text.
             clean_nodegraph (bool): Whether to clear the current node graph before pasting.
 
         Notes:
-            This method use the %clipboard% to paste the text. It makes a backup
+            This method uses the %clipboard% to paste the text. It makes a backup
             of the clipboard to restore it after paste.
         """
         try:
@@ -456,24 +528,66 @@ class NkScriptEditor(QtWidgets.QWidget):
 
             # Override clipboard with PlainText Script
             clipboard.setText(script)
+
+            # Get nodes before paste for comparison
+            nodes_before = self._get_existing_node_names()
+
             if clean_nodegraph:
                 for node in nuke.allNodes(recurseGroups=False):
                     nuke.delete(node)
+                nodes_before = set()  # Reset since we cleared
 
             # Load clipboard in Nuke
+            paste_error = None
             try:
                 nuke.nodePaste("%clipboard%")
+                # Clear any previous error markers on successful paste
+                self.text_edit.clear_error_line()
             except Exception as e:
+                paste_error = e
                 logger.error(f"Error on script paste: {e}")
-                # TODO look for errors on paste and move the cursor to the line
-                # self._move_cursor_to_error_line(add_debug_point=True)
 
             # Restore backup
             clipboard.setMimeData(backup)
+
+            # Handle paste error - detect and navigate to error line
+            if paste_error:
+                self._handle_paste_error(script, paste_error, nodes_before)
+
         except Exception as e:
             msg = f"Error pasting node graph: {e}"
             logger.error(msg)
             nuke.message(msg)
+
+    def _handle_paste_error(self, script, error, nodes_before_paste):
+        """
+        Handle a paste error by detecting and navigating to the error location.
+
+        Args:
+            script (str): The script that was being pasted
+            error (Exception): The exception that occurred
+            nodes_before_paste (set[str]): Node names that existed before paste
+        """
+        # Detect the error line
+        error_line, error_info = self._detect_error_line(
+            script,
+            error_message=str(error),
+            nodes_before_paste=nodes_before_paste
+        )
+
+        # Set error line marker for visual feedback
+        self.text_edit.set_error_line(error_line)
+
+        # Move cursor to error line and add debug point
+        self._move_cursor_to_error_line(
+            error_line,
+            add_debug_point=True,
+            error_info=error_info
+        )
+
+        # Show user message with error details
+        msg = f"Script paste failed.\n\n{error_info}\n\nCursor moved to line {error_line}.\n\nOriginal error: {error}"
+        nuke.message(msg)
 
     def debug_script(self):
         """Paste the portion of the script up to the current debug point into Nuke."""
