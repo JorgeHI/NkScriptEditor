@@ -81,10 +81,6 @@ def validate_structure(script_text):
     # Regex to detect node definition start: "NodeType {"
     node_start_pattern = re.compile(r'^\s*([A-Za-z][A-Za-z0-9_]*)\s*\{\s*$')
 
-    # Track if we're inside a multi-line string/expression
-    in_multiline = False
-    multiline_start_line = 0
-
     for line_num, line in enumerate(lines, start=1):
         # Skip empty lines
         if not line.strip():
@@ -92,6 +88,11 @@ def validate_structure(script_text):
 
         # Check for node definition start
         node_match = node_start_pattern.match(line)
+
+        # Track data braces on this line (braces that are part of data values)
+        # We need to match opening and closing data braces to avoid treating
+        # closing data braces as structural
+        data_brace_depth = 0
 
         # Process each character for brace matching
         i = 0
@@ -117,11 +118,6 @@ def validate_structure(script_text):
             # We detect them by checking if we're inside a knob value context
 
             if char == '{':
-                # Determine if this is a structural brace or data brace
-                is_node_start = (node_match is not None and
-                                 line.rstrip().endswith('{') and
-                                 i == line.rstrip().rfind('{'))
-
                 # Check if this looks like a data brace (inside a knob value)
                 # Data braces typically appear after a space following knob name
                 before = line[:i].rstrip()
@@ -139,28 +135,36 @@ def validate_structure(script_text):
                 if not is_data_brace:
                     node_type = node_match.group(1) if node_match else None
                     brace_stack.append(BraceInfo(line_num, i, node_type))
+                else:
+                    # Track this as a data brace
+                    data_brace_depth += 1
 
             elif char == '}':
-                # Check if this is a structural closing brace
-                before = line[:i].rstrip()
+                # First check if this could be closing a data brace on this line
+                if data_brace_depth > 0:
+                    # This closes a data brace, not a structural brace
+                    data_brace_depth -= 1
+                else:
+                    # Check if this is a structural closing brace
+                    before = line[:i].rstrip()
 
-                # Heuristic: structural closing braces are typically alone or at line end
-                after = line[i + 1:].strip()
-                is_structural = (not before or  # Brace at start of line
-                                 line.strip() == '}' or  # Only brace on line
-                                 (not after and not before.endswith('"')))  # At end, not after string
+                    # Heuristic: structural closing braces are typically alone or at line end
+                    after = line[i + 1:].strip()
+                    is_structural = (not before or  # Brace at start of line
+                                     line.strip() == '}' or  # Only brace on line
+                                     (not after and not before.endswith('"')))  # At end, not after string
 
-                # If we have open braces and this looks structural
-                if is_structural:
-                    if brace_stack:
-                        brace_stack.pop()
-                    else:
-                        # Extra closing brace
-                        errors.append(StructureError(
-                            line_num, i,
-                            "Unexpected closing brace '}' - no matching opening brace",
-                            StructureError.ERROR, 1
-                        ))
+                    # If we have open braces and this looks structural
+                    if is_structural:
+                        if brace_stack:
+                            brace_stack.pop()
+                        else:
+                            # Extra closing brace
+                            errors.append(StructureError(
+                                line_num, i,
+                                "Unexpected closing brace '}' - no matching opening brace",
+                                StructureError.ERROR, 1
+                            ))
 
             i += 1
 
@@ -203,16 +207,12 @@ def validate_node_definitions(script_text):
     node_start_pattern = re.compile(r'^\s*([A-Za-z][A-Za-z0-9_]*)\s*\{\s*$')
     name_pattern = re.compile(r'^\s*name\s+(\S+)')
 
-    current_node = None
-    current_node_line = 0
     brace_depth = 0
 
     for line_num, line in enumerate(lines, start=1):
         # Check for node start
         node_match = node_start_pattern.match(line)
         if node_match and brace_depth == 0:
-            current_node = node_match.group(1)
-            current_node_line = line_num
             brace_depth = 1
             continue
 
@@ -234,10 +234,6 @@ def validate_node_definitions(script_text):
                     ))
                 else:
                     seen_names[node_name] = line_num
-
-            # Check if node closed
-            if brace_depth == 0:
-                current_node = None
 
     return errors
 
