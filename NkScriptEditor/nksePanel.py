@@ -96,6 +96,27 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.encoding_combo.setMaximumWidth(max_width + 10)
         self.encoding_combo.setToolTip("Encoding used for loading and save scripts.")
         buttons_layout.addWidget(self.encoding_combo)
+
+        # Menu button with actions
+        self.menu_button = QtWidgets.QToolButton()
+        self.menu_button.setText("⋮")
+        self.menu_button.setToolTip("Additional actions")
+        self.menu_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.menu_button.setStyleSheet(
+            "QToolButton { font-size: 14px; padding: 2px 4px; } "
+            "QToolButton::menu-indicator { width: 0px; }"
+        )
+
+        # Create menu with actions
+        self.actions_menu = QtWidgets.QMenu(self.menu_button)
+        self.validate_action = self.actions_menu.addAction("Validate Script")
+        self.validate_action.setToolTip("Check script structure for errors")
+        self.compare_action = self.actions_menu.addAction("Compare...")
+        self.compare_action.setToolTip("Compare current script with another .nk file")
+
+        self.menu_button.setMenu(self.actions_menu)
+        buttons_layout.addWidget(self.menu_button)
+
         editor_layout.addLayout(buttons_layout)
 
         # -- File selector
@@ -155,6 +176,20 @@ class NkScriptEditor(QtWidgets.QWidget):
         editor_layout.addWidget(self.text_edit)
         self.highlighter = nkseHighlighter.NkHighlighter(self.text_edit.document())
 
+        # -- Auto-validation timer (500ms debounce)
+        self.validation_timer = QtCore.QTimer()
+        self.validation_timer.setSingleShot(True)
+        self.validation_timer.setInterval(500)
+        self.validation_timer.timeout.connect(self._on_validation_timer)
+
+        # -- Status bar counters
+        self.node_count = 0
+        self.error_count = 0
+        self.warning_count = 0
+        self.current_line = 1
+        self.current_column = 1
+        self.total_lines = 1
+
         # -- Debug controls
         self.debug_layout = QtWidgets.QHBoxLayout()
         self.debug_label = QtWidgets.QLabel("Debugging:")
@@ -186,27 +221,36 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_layout.addStretch()
         editor_layout.addLayout(self.debug_layout)
 
-        # -- Paste / Save / Compare / Validate controls
+        # -- Paste / Save controls
         self.save_layout = QtWidgets.QHBoxLayout()
         self.paste_button = QtWidgets.QPushButton("Paste Script")
         self.paste_button.clicked.connect(self.paste_script)
         self.saveas_button = QtWidgets.QPushButton("Save Script")
         self.saveas_button.clicked.connect(self.save_script)
-        self.compare_button = QtWidgets.QPushButton("Compare...")
-        self.compare_button.setToolTip("Compare current script with another .nk file")
-        self.compare_button.clicked.connect(self.show_diff_viewer)
-        self.validate_button = QtWidgets.QPushButton("Validate")
-        self.validate_button.setToolTip("Check script structure for errors (unmatched braces, etc.)")
-        self.validate_button.clicked.connect(self.validate_script)
-        self.validation_status_label = QtWidgets.QLabel("")
-        self.validation_status_label.setStyleSheet("color: gray;")
         self.save_layout.addWidget(self.paste_button)
         self.save_layout.addWidget(self.saveas_button)
-        self.save_layout.addWidget(self.compare_button)
-        self.save_layout.addWidget(self.validate_button)
-        self.save_layout.addWidget(self.validation_status_label)
-        self.save_layout.addStretch()
         editor_layout.addLayout(self.save_layout)
+
+        # -- Status Bar
+        self.status_bar_layout = QtWidgets.QHBoxLayout()
+        self.error_counter_label = QtWidgets.QLabel("⚠ 0 errors")
+        self.error_counter_label.setStyleSheet("color: gray; padding: 2px 8px;")
+        self.error_counter_label.setToolTip("Number of validation errors")
+        self.warning_counter_label = QtWidgets.QLabel("⚠ 0 warnings")
+        self.warning_counter_label.setStyleSheet("color: gray; padding: 2px 8px;")
+        self.warning_counter_label.setToolTip("Number of validation warnings")
+        self.line_position_label = QtWidgets.QLabel("Ln 1, Col 1 | 0 lines")
+        self.line_position_label.setStyleSheet("color: #c0c0c0; padding: 2px 8px;")
+        self.line_position_label.setToolTip("Current cursor position and total lines")
+        self.node_counter_label = QtWidgets.QLabel("0 nodes")
+        self.node_counter_label.setStyleSheet("color: #a0a0a0; padding: 2px 8px;")
+        self.node_counter_label.setToolTip("Number of nodes detected in script")
+        self.status_bar_layout.addWidget(self.error_counter_label)
+        self.status_bar_layout.addWidget(self.warning_counter_label)
+        self.status_bar_layout.addWidget(self.line_position_label)
+        self.status_bar_layout.addWidget(self.node_counter_label)
+        self.status_bar_layout.addStretch()
+        editor_layout.addLayout(self.status_bar_layout)
 
         # Add the Editor page to the tabs
         self.tabs.addTab(self.editor_page, "Editor")
@@ -253,6 +297,17 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.debug_prev_button.clicked.connect(self.text_edit.set_prev_debug_point)
         self.debug_next_button.clicked.connect(self.text_edit.set_next_debug_point)
         self.debug_paste_button.clicked.connect(self.debug_script)
+
+        # Menu actions connections
+        self.validate_action.triggered.connect(self.validate_script)
+        self.compare_action.triggered.connect(self.show_diff_viewer)
+
+        # Auto-validation and status bar connections
+        self.text_edit.textChanged.connect(self._on_text_changed)
+        self.text_edit.cursorPositionChanged.connect(self._update_cursor_position)
+        # Initial status bar update
+        self._update_cursor_position()
+        self._update_status_bar()
 
         # Force refresh to load current preferences state
         self.prefs_page.force_refresh()
@@ -353,8 +408,9 @@ class NkScriptEditor(QtWidgets.QWidget):
                     self.text_edit.setPlainText(content)
                     # Clear any previous error markers when loading new content
                     self.text_edit.clear_error_line()
-                    # Auto-validate on load
-                    self.validate_script(show_success_message=False)
+                    # Trigger auto-validation via timer
+                    self.validation_timer.stop()
+                    self.validation_timer.start()
             except Exception as e:
                 msg = f"Nk file could not be loaded:\n{e}"
                 logger.error(msg)
@@ -391,8 +447,9 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.text_edit.setPlainText(content)
             # Clear any previous error markers when loading new content
             self.text_edit.clear_error_line()
-            # Auto-validate on load
-            self.validate_script(show_success_message=False)
+            # Trigger auto-validation via timer
+            self.validation_timer.stop()
+            self.validation_timer.start()
 
     def load_root_into_editor(self):
         """Load the root Nuke script path into the editor if available."""
@@ -674,18 +731,36 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         Args:
             show_success_message (bool): Whether to show a message when no errors found
+
+        Note:
+            This method is kept for backward compatibility and manual validation.
+            Auto-validation is now handled by _run_validation_silent().
         """
         current_text = self.text_edit.toPlainText()
         if not current_text.strip():
-            self.validation_status_label.setText("")
             self.text_edit.clear_validation_errors()
+            self.error_count = 0
+            self.warning_count = 0
+            self.node_count = 0
+            self._update_status_bar()
             return
 
         # Run validation
         errors = self.text_edit.validate_structure()
         error_count, warning_count = self.text_edit.get_validation_error_count()
 
-        # Update status label
+        # Count nodes
+        nodes = nkParser.parse_nk_script(current_text)
+        self.node_count = len(nodes)
+
+        # Update counters
+        self.error_count = error_count
+        self.warning_count = warning_count
+
+        # Update status bar
+        self._update_status_bar()
+
+        # Log and optionally show message
         if error_count > 0 or warning_count > 0:
             status_parts = []
             if error_count > 0:
@@ -693,14 +768,116 @@ class NkScriptEditor(QtWidgets.QWidget):
             if warning_count > 0:
                 status_parts.append(f"{warning_count} warning{'s' if warning_count > 1 else ''}")
             status_text = ", ".join(status_parts)
-            self.validation_status_label.setText(status_text)
-            self.validation_status_label.setStyleSheet(
-                "color: #ff5050;" if error_count > 0 else "color: #dca030;"
-            )
             logger.info(f"Validation: {status_text}")
         else:
-            self.validation_status_label.setText("Valid")
-            self.validation_status_label.setStyleSheet("color: #50c050;")
             if show_success_message:
                 nuke.message("Script structure is valid.\n\nNo errors found.")
             logger.info("Validation: No errors found")
+
+    def _on_text_changed(self):
+        """
+        Restart validation timer on text change.
+
+        Implements debounced auto-validation: validation only runs after 500ms
+        of no typing activity.
+        """
+        self.validation_timer.stop()
+        self.validation_timer.start()
+        self.total_lines = self.text_edit.document().blockCount()
+        self._update_status_bar()
+
+    def _on_validation_timer(self):
+        """
+        Run validation when timer expires (500ms after last text change).
+
+        Performs validation silently without showing success messages.
+        """
+        current_text = self.text_edit.toPlainText()
+        if current_text.strip():
+            self._run_validation_silent()
+        else:
+            self.text_edit.clear_validation_errors()
+            self.error_count = 0
+            self.warning_count = 0
+            self.node_count = 0
+            self._update_status_bar()
+
+    def _run_validation_silent(self):
+        """
+        Run validation without user messages.
+
+        Updates error/warning counts and node count, then refreshes the status bar.
+        """
+        current_text = self.text_edit.toPlainText()
+
+        # Run structure validation
+        errors = self.text_edit.validate_structure()
+        error_count, warning_count = self.text_edit.get_validation_error_count()
+
+        # Count nodes using parser
+        nodes = nkParser.parse_nk_script(current_text)
+        self.node_count = len(nodes)
+
+        # Update counters
+        self.error_count = error_count
+        self.warning_count = warning_count
+
+        # Update status bar display
+        self._update_status_bar()
+
+        logger.debug(f"Auto-validation: {error_count} errors, {warning_count} warnings, {self.node_count} nodes")
+
+    def _update_cursor_position(self):
+        """
+        Update the current cursor position (line and column).
+
+        Called whenever the cursor moves in the text editor.
+        Updates the line/position display in the status bar.
+        """
+        cursor = self.text_edit.textCursor()
+
+        # Get line number (1-based)
+        self.current_line = cursor.blockNumber() + 1
+
+        # Get column number (1-based)
+        self.current_column = cursor.columnNumber() + 1
+
+        # Update total lines
+        self.total_lines = self.text_edit.document().blockCount()
+
+        # Update status bar
+        self._update_status_bar()
+
+    def _update_status_bar(self):
+        """
+        Update all status bar labels with current counts and position.
+
+        Updates:
+        - Error counter (red if > 0, gray otherwise)
+        - Warning counter (orange if > 0, gray otherwise)
+        - Line/position display (always visible)
+        - Node counter (always visible)
+        """
+        # Update error counter
+        error_text = f"⚠ {self.error_count} error{'s' if self.error_count != 1 else ''}"
+        if self.error_count > 0:
+            self.error_counter_label.setStyleSheet("color: #ff5050; font-weight: bold; padding: 2px 8px;")
+        else:
+            self.error_counter_label.setStyleSheet("color: gray; padding: 2px 8px;")
+        self.error_counter_label.setText(error_text)
+
+        # Update warning counter
+        warning_text = f"⚠ {self.warning_count} warning{'s' if self.warning_count != 1 else ''}"
+        if self.warning_count > 0:
+            self.warning_counter_label.setStyleSheet("color: #dca030; font-weight: bold; padding: 2px 8px;")
+        else:
+            self.warning_counter_label.setStyleSheet("color: gray; padding: 2px 8px;")
+        self.warning_counter_label.setText(warning_text)
+
+        # Update line/position counter
+        position_text = f"Ln {self.current_line}, Col {self.current_column} | {self.total_lines} lines"
+        self.line_position_label.setText(position_text)
+
+        # Update node counter
+        node_text = f"{self.node_count} node{'s' if self.node_count != 1 else ''}"
+        self.node_counter_label.setText(node_text)
