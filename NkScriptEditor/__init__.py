@@ -26,9 +26,11 @@ def add_nk_script_editor_panel():
     logger.debug("Panel Created")
     return nksePanel.NkScriptEditor()
 
-nukescripts.registerWidgetAsPanel(
-    "NkScriptEditor.add_nk_script_editor_panel",
-    "Nk Script Editor",
-    "jorgehi.nkScriptEditor",
-    True
-)
+def init():
+    logger.info("Initializing Nk Script Editor...")
+    nukescripts.registerWidgetAsPanel(
+        "NkScriptEditor.add_nk_script_editor_panel",
+        "Nk Script Editor",
+        "jorgehi.nkScriptEditor",
+        True
+    )

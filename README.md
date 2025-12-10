@@ -46,6 +46,7 @@ WIP
 3. Add this code:
 ```python
 import NkScriptEditor
+NkScriptEditor.init()
 ```
 4. Restart Nuke.
 
