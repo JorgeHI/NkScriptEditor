@@ -113,6 +113,9 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.validate_action.setToolTip("Check script structure for errors")
         self.compare_action = self.actions_menu.addAction("Compare...")
         self.compare_action.setToolTip("Compare current script with another .nk file")
+        self.actions_menu.addSeparator()
+        self.debug_toggle_action = self.actions_menu.addAction("Show Debug")
+        self.debug_toggle_action.setToolTip("Show/hide debugging controls")
 
         self.menu_button.setMenu(self.actions_menu)
         buttons_layout.addWidget(self.menu_button)
@@ -190,8 +193,10 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.current_column = 1
         self.total_lines = 1
 
-        # -- Debug controls
-        self.debug_layout = QtWidgets.QHBoxLayout()
+        # -- Debug controls (wrapped in a widget for visibility toggle)
+        self.debug_widget = QtWidgets.QWidget()
+        self.debug_layout = QtWidgets.QHBoxLayout(self.debug_widget)
+        self.debug_layout.setContentsMargins(0, 0, 0, 0)
         self.debug_label = QtWidgets.QLabel("Debugging:")
         self.debug_prev_button = QtWidgets.QPushButton("<")
         self.debug_prev_button.setToolTip("Go to previous breakpoint.")
@@ -219,7 +224,8 @@ class NkScriptEditor(QtWidgets.QWidget):
         ):
             self.debug_layout.addWidget(w)
         self.debug_layout.addStretch()
-        editor_layout.addLayout(self.debug_layout)
+        self.debug_widget.setVisible(False)  # Hidden by default
+        editor_layout.addWidget(self.debug_widget)
 
         # -- Paste / Save controls
         self.save_layout = QtWidgets.QHBoxLayout()
@@ -291,6 +297,7 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # Preference signals
         self.prefs_page.wrapTextToggled.connect(self.toggle_wrap_text)
+        self.prefs_page.showEncodingToggled.connect(self.toggle_encoding_visibility)
         self.prefs_page.apply_preferences.connect(self.highlighter.update_formats)
         # Debug button connections
         self.debug_clear_button.clicked.connect(self.text_edit.clean_all_debug_points)
@@ -301,6 +308,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Menu actions connections
         self.validate_action.triggered.connect(self.validate_script)
         self.compare_action.triggered.connect(self.show_diff_viewer)
+        self.debug_toggle_action.triggered.connect(self.toggle_debug_visibility)
 
         # Auto-validation and status bar connections
         self.text_edit.textChanged.connect(self._on_text_changed)
@@ -312,6 +320,35 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Force refresh to load current preferences state
         self.prefs_page.force_refresh()
 
+        # Load debug visibility preference
+        self.load_debug_visibility_preference()
+
+    def load_debug_visibility_preference(self):
+        """Load the debug visibility state from preferences on startup."""
+        import json
+        import os
+
+        try:
+            if os.path.isfile(nkConstants.pref_filepath):
+                with open(nkConstants.pref_filepath, 'r') as f:
+                    prefs = json.load(f)
+                is_visible = prefs.get("debug_visible", False)  # Default to hidden
+            else:
+                is_visible = False  # Default to hidden
+
+            # Apply visibility state
+            self.debug_widget.setVisible(is_visible)
+
+            # Update menu action text
+            self.debug_toggle_action.setText("Hide Debug" if is_visible else "Show Debug")
+
+            logger.debug(f"Debug visibility loaded from preferences: {is_visible}")
+        except Exception as e:
+            logger.error(f"Failed to load debug visibility preference: {e}")
+            # Default to hidden on error
+            self.debug_widget.setVisible(False)
+            self.debug_toggle_action.setText("Show Debug")
+
     def on_ctrl_f_pressed(self):
         """Show the search bar only if this widget or its text editor is focused."""
         if self.isActiveWindow() or self.text_edit.hasFocus():
@@ -322,6 +359,55 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.search_layout_widget.setVisible(not self.search_layout_widget.isVisible())
         if self.search_layout_widget.isVisible():
             self.search_input.setFocus()
+
+    def toggle_debug_visibility(self):
+        """
+        Toggle the visibility of the debug controls row.
+
+        Updates the menu action text based on current state and saves the
+        preference for persistence across sessions.
+        """
+        # Toggle visibility
+        is_visible = not self.debug_widget.isVisible()
+        self.debug_widget.setVisible(is_visible)
+
+        # Update menu action text
+        self.debug_toggle_action.setText("Hide Debug" if is_visible else "Show Debug")
+
+        # Save preference
+        self.save_debug_visibility_preference(is_visible)
+
+        logger.info(f"Debug controls {'shown' if is_visible else 'hidden'}")
+
+    def save_debug_visibility_preference(self, is_visible):
+        """
+        Save the debug visibility state to preferences.
+
+        Args:
+            is_visible (bool): Whether debug controls are visible
+        """
+        import json
+        import os
+
+        try:
+            # Load existing preferences
+            if os.path.isfile(nkConstants.pref_filepath):
+                with open(nkConstants.pref_filepath, 'r') as f:
+                    prefs = json.load(f)
+            else:
+                prefs = {}
+
+            # Update debug visibility
+            prefs["debug_visible"] = is_visible
+
+            # Save preferences
+            os.makedirs(nkConstants.config_dir, exist_ok=True)
+            with open(nkConstants.pref_filepath, 'w', encoding='utf-8') as f:
+                json.dump(prefs, f, indent=4)
+
+            logger.debug(f"Debug visibility preference saved: {is_visible}")
+        except Exception as e:
+            logger.error(f"Failed to save debug visibility preference: {e}")
 
     def get_search_value(self):
         """
@@ -423,6 +509,19 @@ class NkScriptEditor(QtWidgets.QWidget):
     def toggle_wrap_text(self, checked):
         """Enable or disable text wrapping in the editor based on the checkbox state."""
         self.text_edit.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth if checked else QtWidgets.QPlainTextEdit.NoWrap)
+
+    def toggle_encoding_visibility(self, show):
+        """
+        Show or hide the encoding combobox in the editor.
+
+        Args:
+            show (bool): True to show the encoding combobox, False to hide it and use UTF-8
+        """
+        self.encoding_combo.setVisible(show)
+        # When hidden, always use UTF-8
+        if not show:
+            self.encoding_combo.setCurrentText("utf-8")
+        logger.debug(f"Encoding selector {'shown' if show else 'hidden'}")
 
     def get_nodegraph_script(self):
         try:
