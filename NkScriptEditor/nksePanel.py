@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import json
+import difflib
 
 import nuke
 from NkScriptEditor import nkseHighlighter
@@ -22,6 +23,7 @@ from NkScriptEditor import nkConstants
 from NkScriptEditor import nkUtils
 from NkScriptEditor import nkParser
 from NkScriptEditor import nkDiffViewer
+from NkScriptEditor.nkDiffViewer import DiffTextEdit
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -122,22 +124,6 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         editor_layout.addLayout(buttons_layout)
 
-        # -- File selector
-        file_selector_layout = QtWidgets.QHBoxLayout()
-        self.file_path_lineedit = QtWidgets.QLineEdit()
-        self.file_path_lineedit.setPlaceholderText("Select a file .nk...")
-        self.browse_button = QtWidgets.QToolButton()
-        browse_icon = QtGui.QIcon(nkConstants.icons.open_folder)
-        self.browse_button.setIcon(browse_icon)
-        self.browse_button.clicked.connect(self.browse_file)
-        self.load_nk_button = QtWidgets.QPushButton("Load nk file")
-        self.load_nk_button.clicked.connect(self.load_nk_file_into_editor)
-
-        file_selector_layout.addWidget(self.file_path_lineedit)
-        file_selector_layout.addWidget(self.browse_button)
-        file_selector_layout.addWidget(self.load_nk_button)
-        editor_layout.addLayout(file_selector_layout)
-
         # -- Search bar (hidden by default)
         self.search_layout = QtWidgets.QHBoxLayout()
         self.search_input = QtWidgets.QLineEdit()
@@ -174,10 +160,148 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.search_layout_widget.setVisible(False)
         editor_layout.addWidget(self.search_layout_widget)
 
-        # -- Script editor widget and syntax highlighter
+        # -- Dual editor layout with horizontal splitter
+        self.editor_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        # Set size policy to expand vertically
+        self.editor_splitter.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding
+        )
+        self.editor_splitter.setHandleWidth(4)
+
+        # === LEFT EDITOR CONTAINER (Main/Editable) ===
+        self.left_editor_container = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(self.left_editor_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(2)
+
+        # Add file selector for left editor
+        left_file_selector_layout, self.left_file_path_lineedit, self.browse_button, self.load_nk_button = self._create_file_selector(
+            "Select a file .nk...", "Load nk file"
+        )
+        # Keep backward compatibility reference
+        self.file_path_lineedit = self.left_file_path_lineedit
+        # Connect signals
+        self.browse_button.clicked.connect(self.browse_file)
+        self.load_nk_button.clicked.connect(self.load_nk_file_into_editor)
+        left_layout.addLayout(left_file_selector_layout)
+
+        # Add main script editor
         self.text_edit = nkCodeEditor.CodeEditor()
-        editor_layout.addWidget(self.text_edit)
+        left_layout.addWidget(self.text_edit)  # No stretch factor in splitter
         self.highlighter = nkseHighlighter.NkHighlighter(self.text_edit.document())
+
+        # === RIGHT EDITOR CONTAINER (Compare View) ===
+        self.right_editor_container = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(self.right_editor_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(2)
+
+        # Add right file selector for compare
+        right_file_selector_layout, self.right_file_path_lineedit, self.right_browse_button, self.right_load_compare_button = self._create_file_selector(
+            "Select file to compare...", "Load compare file"
+        )
+        right_layout.addLayout(right_file_selector_layout)
+
+        # Create compare editor (read-only CodeEditor)
+        self.compare_editor = nkCodeEditor.CodeEditor()
+        self.compare_editor.setReadOnly(True)  # Make it read-only
+        right_layout.addWidget(self.compare_editor)
+
+        # Add syntax highlighter to compare editor
+        self.compare_highlighter = nkseHighlighter.NkHighlighter(self.compare_editor.document())
+
+        # Add both containers to splitter
+        self.editor_splitter.addWidget(self.left_editor_container)
+        self.editor_splitter.addWidget(self.right_editor_container)
+        self.editor_splitter.setSizes([600, 600])
+
+        # Style splitter
+        self.editor_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #555;
+            }
+            QSplitter::handle:hover {
+                background-color: #777;
+            }
+        """)
+
+        # Hide compare view by default
+        self.right_editor_container.setVisible(False)
+        self.compare_visible = False
+
+        # Add state tracking for diff
+        self.diff_positions = []
+        self.current_diff_index = -1
+        self.diff_extra_selections = []  # Store diff highlights for left editor
+        self.diff_extra_selections_right = []  # Store diff highlights for right editor
+
+        # Setup scroll synchronization
+        self._setup_scroll_sync()
+
+        # Connect to preserve diff highlighting when editors update selections
+        self.text_edit.cursorPositionChanged.connect(self._update_left_editor_selections)
+        self.compare_editor.cursorPositionChanged.connect(self._update_right_editor_selections)
+
+        # Add splitter to main layout
+        editor_layout.addWidget(self.editor_splitter)
+
+        # -- Compare controls (outside splitter, at bottom, spanning full width)
+        self.compare_controls_widget = QtWidgets.QWidget()
+        compare_controls_layout = QtWidgets.QHBoxLayout(self.compare_controls_widget)
+        compare_controls_layout.setContentsMargins(0, 0, 0, 0)
+        compare_controls_layout.setSpacing(8)
+
+        # Compare title
+        self.compare_title_label = QtWidgets.QLabel("Compare View")
+        self.compare_title_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        compare_controls_layout.addWidget(self.compare_title_label)
+
+        # Separator
+        compare_controls_layout.addSpacing(10)
+
+        # Diff legend
+        legend_items = [
+            ("Added", "#285028"),
+            ("Deleted", "#642828"),
+            ("Modified", "#5a5028")
+        ]
+
+        for label_text, color in legend_items:
+            indicator = QtWidgets.QLabel("  ")
+            indicator.setStyleSheet(f"background-color: {color}; border: 1px solid #555;")
+            indicator.setFixedSize(16, 12)
+            compare_controls_layout.addWidget(indicator)
+            label = QtWidgets.QLabel(label_text)
+            label.setStyleSheet("font-size: 9pt;")
+            compare_controls_layout.addWidget(label)
+            compare_controls_layout.addSpacing(8)
+
+        # Stretch to push navigation to the right
+        compare_controls_layout.addStretch()
+
+        # Navigation buttons
+        self.prev_diff_btn = QtWidgets.QPushButton("< Prev")
+        self.prev_diff_btn.setMaximumWidth(60)
+        compare_controls_layout.addWidget(self.prev_diff_btn)
+
+        self.diff_counter_label = QtWidgets.QLabel("0 / 0")
+        self.diff_counter_label.setStyleSheet("padding: 0 8px;")
+        compare_controls_layout.addWidget(self.diff_counter_label)
+
+        self.next_diff_btn = QtWidgets.QPushButton("Next >")
+        self.next_diff_btn.setMaximumWidth(60)
+        compare_controls_layout.addWidget(self.next_diff_btn)
+
+        # Close button
+        self.close_compare_button = QtWidgets.QPushButton("✕")
+        self.close_compare_button.setFixedSize(24, 24)
+        self.close_compare_button.setToolTip("Close compare view")
+        compare_controls_layout.addWidget(self.close_compare_button)
+
+        # Hide compare controls by default
+        self.compare_controls_widget.setVisible(False)
+        editor_layout.addWidget(self.compare_controls_widget)
 
         # -- Auto-validation timer (500ms debounce)
         self.validation_timer = QtCore.QTimer()
@@ -307,8 +431,15 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # Menu actions connections
         self.validate_action.triggered.connect(self.validate_script)
-        self.compare_action.triggered.connect(self.show_diff_viewer)
+        self.compare_action.triggered.connect(self.toggle_compare_view)
         self.debug_toggle_action.triggered.connect(self.toggle_debug_visibility)
+
+        # Compare view signal connections
+        self.close_compare_button.clicked.connect(self.toggle_compare_view)
+        self.right_browse_button.clicked.connect(self.browse_compare_file)
+        self.right_load_compare_button.clicked.connect(self.load_compare_file)
+        self.prev_diff_btn.clicked.connect(self.go_to_prev_diff)
+        self.next_diff_btn.clicked.connect(self.go_to_next_diff)
 
         # Auto-validation and status bar connections
         self.text_edit.textChanged.connect(self._on_text_changed)
@@ -322,6 +453,43 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # Load debug visibility preference
         self.load_debug_visibility_preference()
+
+        # Load compare visibility preference
+        self.load_compare_visibility_preference()
+
+    def _create_file_selector(self, placeholder_text, load_button_text=None):
+        """
+        Create a reusable file selector layout with lineedit, browse button, and optional load button.
+
+        Args:
+            placeholder_text (str): Placeholder text for the line edit
+            load_button_text (str, optional): Text for the load button. If None, no load button is created.
+
+        Returns:
+            tuple: (layout, lineedit, browse_button, load_button or None)
+        """
+        file_selector_layout = QtWidgets.QHBoxLayout()
+
+        # Create line edit
+        file_path_lineedit = QtWidgets.QLineEdit()
+        file_path_lineedit.setPlaceholderText(placeholder_text)
+
+        # Create browse button
+        browse_button = QtWidgets.QToolButton()
+        browse_icon = QtGui.QIcon(nkConstants.icons.open_folder)
+        browse_button.setIcon(browse_icon)
+
+        # Add widgets to layout
+        file_selector_layout.addWidget(file_path_lineedit)
+        file_selector_layout.addWidget(browse_button)
+
+        # Create optional load button
+        load_button = None
+        if load_button_text:
+            load_button = QtWidgets.QPushButton(load_button_text)
+            file_selector_layout.addWidget(load_button)
+
+        return file_selector_layout, file_path_lineedit, browse_button, load_button
 
     def load_debug_visibility_preference(self):
         """Load the debug visibility state from preferences on startup."""
@@ -408,6 +576,326 @@ class NkScriptEditor(QtWidgets.QWidget):
             logger.debug(f"Debug visibility preference saved: {is_visible}")
         except Exception as e:
             logger.error(f"Failed to save debug visibility preference: {e}")
+
+    def toggle_compare_view(self):
+        """Toggle visibility of the compare view."""
+        self.compare_visible = not self.compare_visible
+        self.right_editor_container.setVisible(self.compare_visible)
+        self.compare_controls_widget.setVisible(self.compare_visible)
+
+        # Update menu action text
+        self.compare_action.setText("Hide Compare" if self.compare_visible else "Compare...")
+
+        # If showing, trigger diff computation if both texts are available
+        if self.compare_visible:
+            left_text = self.text_edit.toPlainText()
+            right_text = self.compare_editor.toPlainText()
+            if left_text.strip() and right_text.strip():
+                self.compute_inline_diff()
+        else:
+            # If hiding, clear diff highlighting from both editors
+            self.diff_extra_selections = []
+            self.diff_extra_selections_right = []
+            self._update_left_editor_selections()
+            self._update_right_editor_selections()
+
+        # Save preference
+        self.save_compare_visibility_preference(self.compare_visible)
+
+        logger.info(f"Compare view {'shown' if self.compare_visible else 'hidden'}")
+
+    def load_compare_visibility_preference(self):
+        """Load compare visibility state from preferences on startup."""
+        try:
+            if os.path.isfile(nkConstants.pref_filepath):
+                with open(nkConstants.pref_filepath, 'r') as f:
+                    prefs = json.load(f)
+                is_visible = prefs.get("compare_visible", False)
+            else:
+                is_visible = False
+
+            self.compare_visible = is_visible
+            self.right_editor_container.setVisible(is_visible)
+            self.compare_controls_widget.setVisible(is_visible)
+            self.compare_action.setText("Hide Compare" if is_visible else "Compare...")
+
+            logger.debug(f"Compare visibility loaded: {is_visible}")
+        except Exception as e:
+            logger.error(f"Failed to load compare visibility: {e}")
+            self.compare_visible = False
+            self.right_editor_container.setVisible(False)
+            self.compare_controls_widget.setVisible(False)
+
+    def save_compare_visibility_preference(self, is_visible):
+        """Save compare visibility state to preferences."""
+        try:
+            if os.path.isfile(nkConstants.pref_filepath):
+                with open(nkConstants.pref_filepath, 'r') as f:
+                    prefs = json.load(f)
+            else:
+                prefs = {}
+
+            prefs["compare_visible"] = is_visible
+
+            os.makedirs(nkConstants.config_dir, exist_ok=True)
+            with open(nkConstants.pref_filepath, 'w', encoding='utf-8') as f:
+                json.dump(prefs, f, indent=4)
+
+            logger.debug(f"Compare visibility saved: {is_visible}")
+        except Exception as e:
+            logger.error(f"Failed to save compare visibility: {e}")
+
+    def browse_compare_file(self):
+        """Open file dialog to select compare file."""
+        file_path = nuke.getFilename('Select a .nk file to compare', '*.nk')
+        if file_path:
+            self.right_file_path_lineedit.setText(file_path)
+
+    def load_compare_file(self):
+        """Load selected file into compare editor."""
+        file_path = self.right_file_path_lineedit.text()
+        if file_path and os.path.isfile(file_path):
+            selected_encoding = self.encoding_combo.currentText()
+            try:
+                with open(file_path, 'r', encoding=selected_encoding) as f:
+                    content = f.read()
+                self.compare_editor.setPlainText(content)
+                self.compare_title_label.setText(f"Compare: {os.path.basename(file_path)}")
+
+                # Auto-compute diff if compare view is visible
+                if self.compare_visible:
+                    self.compute_inline_diff()
+
+                logger.info(f"Compare file loaded: {file_path}")
+            except Exception as e:
+                msg = f"Compare file could not be loaded:\n{e}"
+                logger.error(msg)
+                nuke.message(msg)
+        else:
+            nuke.message(f"The filepath '{file_path}' does not exist.")
+
+    def compute_inline_diff(self):
+        """Compute and display diff between left and right editors."""
+        left_text = self.text_edit.toPlainText()
+        right_text = self.compare_editor.toPlainText()
+
+        if not left_text.strip() or not right_text.strip():
+            logger.warning("Cannot compute diff: one or both editors are empty")
+            return
+
+        left_lines = left_text.splitlines()
+        right_lines = right_text.splitlines()
+
+        matcher = difflib.SequenceMatcher(None, left_lines, right_lines)
+
+        # Build line types for left editor (original content, just highlighting)
+        # Build line types for right editor (original content, just highlighting)
+        left_line_types = {}  # Map: line_num -> type
+        right_line_types = {}  # Map: line_num -> type
+        self.diff_positions = []
+
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                # Equal lines - no highlighting needed
+                for idx in range(i1, i2):
+                    left_line_types[idx] = 'equal'
+                for idx in range(j1, j2):
+                    right_line_types[idx] = 'equal'
+            elif tag == 'replace':
+                # Modified lines - show as mod on both sides
+                for idx in range(i1, i2):
+                    left_line_types[idx] = 'mod'
+                    self.diff_positions.append(idx)
+                for idx in range(j1, j2):
+                    right_line_types[idx] = 'mod'
+            elif tag == 'delete':
+                # Deleted lines - show as del on left only
+                for idx in range(i1, i2):
+                    left_line_types[idx] = 'del'
+                    self.diff_positions.append(idx)
+            elif tag == 'insert':
+                # Added lines - show as add on right only
+                for idx in range(j1, j2):
+                    right_line_types[idx] = 'add'
+                    self.diff_positions.append(idx)
+
+        # Apply highlighting to both editors (keeps original content in both)
+        self._apply_diff_highlighting_to_left(left_line_types)
+        self._apply_diff_highlighting_to_right(right_line_types)
+
+        # Update diff counter
+        self.current_diff_index = -1
+        self._update_diff_counter()
+
+        logger.debug(f"Inline diff computed: {len(self.diff_positions)} differences")
+
+    def _apply_diff_highlighting_to_left(self, line_types_dict):
+        """Apply diff highlighting to the left (main) editor.
+
+        Args:
+            line_types_dict: Dictionary mapping line_num -> type ('add', 'del', 'mod', 'equal')
+        """
+        # Store diff selections separately to preserve them
+        self.diff_extra_selections = []
+
+        colors = {
+            'add': QtGui.QColor(40, 80, 40),    # Green
+            'del': QtGui.QColor(100, 40, 40),   # Red
+            'mod': QtGui.QColor(90, 80, 40),    # Yellow
+        }
+
+        for line_num, line_type in line_types_dict.items():
+            if line_type in colors:
+                selection = QtWidgets.QTextEdit.ExtraSelection()
+                selection.format.setBackground(colors[line_type])
+                selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+
+                cursor = QtGui.QTextCursor(self.text_edit.document().findBlockByNumber(line_num))
+                selection.cursor = cursor
+                self.diff_extra_selections.append(selection)
+
+        # Merge with existing extra selections (like current line highlight)
+        self._update_left_editor_selections()
+
+    def _apply_diff_highlighting_to_right(self, line_types_dict):
+        """Apply diff highlighting to the right (compare) editor.
+
+        Args:
+            line_types_dict: Dictionary mapping line_num -> type ('add', 'del', 'mod', 'equal')
+        """
+        # Store diff selections separately to preserve them
+        self.diff_extra_selections_right = []
+
+        colors = {
+            'add': QtGui.QColor(40, 80, 40),    # Green
+            'del': QtGui.QColor(100, 40, 40),   # Red
+            'mod': QtGui.QColor(90, 80, 40),    # Yellow
+        }
+
+        for line_num, line_type in line_types_dict.items():
+            if line_type in colors:
+                selection = QtWidgets.QTextEdit.ExtraSelection()
+                selection.format.setBackground(colors[line_type])
+                selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+
+                cursor = QtGui.QTextCursor(self.compare_editor.document().findBlockByNumber(line_num))
+                selection.cursor = cursor
+                self.diff_extra_selections_right.append(selection)
+
+        # Merge with existing extra selections (like current line highlight)
+        self._update_right_editor_selections()
+
+    def _update_left_editor_selections(self):
+        """Update left editor selections, merging diff highlights with existing selections."""
+        # Get current extra selections from the editor (if any)
+        current_selections = self.text_edit.extraSelections()
+
+        # Filter out old diff selections (they don't have specific markers, so we'll replace all)
+        # Keep only the first selection if it exists (usually current line highlight)
+        other_selections = []
+        if current_selections and len(current_selections) > 0:
+            # The CodeEditor typically puts current line highlight as first selection
+            # We'll keep it if it exists
+            other_selections = [current_selections[0]] if current_selections else []
+
+        # Combine: other selections + diff selections
+        all_selections = other_selections + self.diff_extra_selections
+
+        # Apply all selections
+        self.text_edit.setExtraSelections(all_selections)
+
+    def _update_right_editor_selections(self):
+        """Update right editor selections, merging diff highlights with existing selections."""
+        # Get current extra selections from the editor (if any)
+        current_selections = self.compare_editor.extraSelections()
+
+        # Keep only the first selection if it exists (usually current line highlight)
+        other_selections = []
+        if current_selections and len(current_selections) > 0:
+            other_selections = [current_selections[0]] if current_selections else []
+
+        # Combine: other selections + diff selections
+        all_selections = other_selections + self.diff_extra_selections_right
+
+        # Apply all selections
+        self.compare_editor.setExtraSelections(all_selections)
+
+    def _update_diff_counter(self):
+        """Update diff counter label."""
+        total = len(self.diff_positions)
+        current = self.current_diff_index + 1 if self.current_diff_index >= 0 else 0
+        self.diff_counter_label.setText(f"{current} / {total}")
+
+    def go_to_next_diff(self):
+        """Navigate to next difference."""
+        if not self.diff_positions:
+            return
+
+        self.current_diff_index += 1
+        if self.current_diff_index >= len(self.diff_positions):
+            self.current_diff_index = 0
+
+        self._scroll_to_diff(self.current_diff_index)
+        self._update_diff_counter()
+
+    def go_to_prev_diff(self):
+        """Navigate to previous difference."""
+        if not self.diff_positions:
+            return
+
+        self.current_diff_index -= 1
+        if self.current_diff_index < 0:
+            self.current_diff_index = len(self.diff_positions) - 1
+
+        self._scroll_to_diff(self.current_diff_index)
+        self._update_diff_counter()
+
+    def _scroll_to_diff(self, index):
+        """Scroll both editors to show diff at given index."""
+        if index < 0 or index >= len(self.diff_positions):
+            return
+
+        line_num = self.diff_positions[index]
+
+        # Scroll compare editor
+        block = self.compare_editor.document().findBlockByNumber(line_num)
+        if block.isValid():
+            cursor = QtGui.QTextCursor(block)
+            self.compare_editor.setTextCursor(cursor)
+            self.compare_editor.centerCursor()
+
+        # Scroll main editor to same position
+        block = self.text_edit.document().findBlockByNumber(line_num)
+        if block.isValid():
+            cursor = QtGui.QTextCursor(block)
+            self.text_edit.setTextCursor(cursor)
+            self.text_edit.centerCursor()
+
+    def _setup_scroll_sync(self):
+        """Setup synchronized scrolling between left and right editors."""
+        # Vertical scroll sync
+        self.text_edit.verticalScrollBar().valueChanged.connect(
+            self.compare_editor.verticalScrollBar().setValue)
+        self.compare_editor.verticalScrollBar().valueChanged.connect(
+            self.text_edit.verticalScrollBar().setValue)
+
+        # Horizontal scroll sync
+        self.text_edit.horizontalScrollBar().valueChanged.connect(
+            self.compare_editor.horizontalScrollBar().setValue)
+        self.compare_editor.horizontalScrollBar().valueChanged.connect(
+            self.text_edit.horizontalScrollBar().setValue)
+
+    def clear_compare_view(self):
+        """Clear the compare editor and reset diff state."""
+        self.compare_editor.clear()
+        self.right_file_path_lineedit.clear()
+        self.compare_title_label.setText("Compare View")
+        self.diff_positions = []
+        self.current_diff_index = -1
+        self.diff_extra_selections = []  # Clear diff highlighting
+        self._update_left_editor_selections()  # Update to remove highlights
+        self._update_diff_counter()
+        logger.debug("Compare view cleared")
 
     def get_search_value(self):
         """
@@ -787,37 +1275,6 @@ class NkScriptEditor(QtWidgets.QWidget):
                 msg = f"Error saving script: {e}"
                 logger.error(msg)
                 nuke.message(msg)
-
-    def show_diff_viewer(self):
-        """
-        Open the diff viewer dialog to compare the current script with another file.
-
-        The diff viewer shows a side-by-side comparison with:
-        - Green highlighting for added lines
-        - Red highlighting for deleted lines
-        - Yellow highlighting for modified lines
-        - Navigation buttons to jump between differences
-        """
-        current_text = self.text_edit.toPlainText()
-        if not current_text.strip():
-            nuke.message("No script loaded in the editor.\n\n"
-                         "Load a script first before comparing.")
-            return
-
-        # Determine title based on loaded file path
-        file_path = self.file_path_lineedit.text()
-        if file_path:
-            current_title = os.path.basename(file_path)
-        else:
-            current_title = "Current Script"
-
-        # Show the diff dialog
-        self.diff_dialog = nkDiffViewer.show_diff_dialog(
-            self,
-            current_text=current_text,
-            current_title=current_title
-        )
-        logger.debug("Diff viewer opened")
 
     def validate_script(self, show_success_message=True):
         """
