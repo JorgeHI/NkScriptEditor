@@ -38,6 +38,128 @@ else:
     from PySide6 import QtWidgets, QtGui, QtCore
 
 
+from functools import partial
+
+
+class MergeControlWidget(QtWidgets.QWidget):
+    """Widget showing merge controls between diff editors.
+
+    Displays arrow buttons at each diff block that allow copying changes
+    from the right (compare) editor to the left (editable) editor.
+    """
+
+    merge_requested = QtCore.Signal(str, int, int, int, int)  # (tag, i1, i2, j1, j2)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(30)
+        self.diff_blocks = []  # List of (tag, i1, i2, j1, j2, y_pos)
+        self.buttons = []  # List of merge buttons
+        self.editor_offset = 0  # Vertical offset to account for file selector
+
+        # Style the widget
+        self.setStyleSheet("""
+            MergeControlWidget {
+                background-color: #2a2a2a;
+                border-left: 1px solid #555;
+                border-right: 1px solid #555;
+            }
+            QPushButton {
+                background-color: #3a7ebf;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4a8ecf;
+            }
+            QPushButton:pressed {
+                background-color: #2a6eaf;
+            }
+        """)
+
+    def set_diff_blocks(self, diff_blocks, left_editor, right_editor, editor_widget):
+        """Update diff blocks and create merge buttons.
+
+        Args:
+            diff_blocks: List of (tag, i1, i2, j1, j2) tuples from SequenceMatcher
+            left_editor: Reference to left CodeEditor
+            right_editor: Reference to right CodeEditor
+            editor_widget: Reference to left_editor_container to calculate offset
+        """
+        # Clear existing buttons
+        for btn in self.buttons:
+            btn.deleteLater()
+        self.buttons = []
+        self.diff_blocks = []
+
+        # Calculate offset from file selector and other widgets above the editor
+        # Get the editor's position within its parent container
+        editor_y_in_container = left_editor.mapTo(editor_widget, left_editor.rect().topLeft()).y()
+        self.editor_offset = editor_y_in_container
+
+        # Create buttons for each diff block
+        for tag, i1, i2, j1, j2 in diff_blocks:
+            if tag != 'equal':
+                # Calculate vertical position based on left editor line position
+                y_pos = self._get_line_y_position(left_editor, i1)
+
+                # Add offset to account for file selector above editor
+                adjusted_y_pos = y_pos + self.editor_offset
+
+                # Create merge button (smaller to match line height)
+                btn = QtWidgets.QPushButton("←", self)
+                btn.setFixedSize(24, 16)  # Smaller height to match line height
+                btn.setToolTip(self._get_tooltip(tag, i1, i2, j1, j2))
+                btn.move(3, adjusted_y_pos)
+
+                # Use partial to avoid lambda closure issues
+                btn.clicked.connect(
+                    partial(self._emit_merge_request, tag, i1, i2, j1, j2)
+                )
+                btn.show()
+
+                self.buttons.append(btn)
+                self.diff_blocks.append((tag, i1, i2, j1, j2, adjusted_y_pos))
+
+    def _emit_merge_request(self, tag, i1, i2, j1, j2):
+        """Helper method to emit merge request signal."""
+        self.merge_requested.emit(tag, i1, i2, j1, j2)
+
+    def _get_line_y_position(self, editor, line_num):
+        """Get Y position for a line number in the editor relative to viewport."""
+        block = editor.document().findBlockByNumber(line_num)
+        if block.isValid():
+            # Get the bounding geometry for the block
+            block_geometry = editor.blockBoundingGeometry(block)
+            # Translate by content offset to get position relative to viewport
+            block_top = block_geometry.translated(editor.contentOffset()).top()
+            return int(block_top)
+        return 0
+
+    def _get_tooltip(self, tag, i1, i2, j1, j2):
+        """Generate tooltip text for merge button."""
+        if tag == 'insert':
+            return f"Accept {j2-j1} added line(s) from right"
+        elif tag == 'delete':
+            return f"Accept deletion of {i2-i1} line(s)"
+        elif tag == 'replace':
+            return f"Replace {i2-i1} line(s) with {j2-j1} from right"
+        return "Merge change"
+
+    def update_positions(self, left_editor):
+        """Update button positions after scrolling or text changes."""
+        for i, (tag, i1, i2, j1, j2, old_y) in enumerate(self.diff_blocks):
+            new_y = self._get_line_y_position(left_editor, i1)
+            # Add offset to account for file selector
+            adjusted_y = new_y + self.editor_offset
+            if i < len(self.buttons):
+                self.buttons[i].move(3, adjusted_y)
+                # Update stored position
+                self.diff_blocks[i] = (tag, i1, i2, j1, j2, adjusted_y)
+
+
 class NkScriptEditor(QtWidgets.QWidget):
     """
     Main widget for the Nk Script Editor panel in Nuke.
@@ -206,15 +328,23 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Create compare editor (read-only CodeEditor)
         self.compare_editor = nkCodeEditor.CodeEditor()
         self.compare_editor.setReadOnly(True)  # Make it read-only
+        self.compare_editor.disable_breakpoints()  # Disable breakpoint toggling
         right_layout.addWidget(self.compare_editor)
 
         # Add syntax highlighter to compare editor
         self.compare_highlighter = nkseHighlighter.NkHighlighter(self.compare_editor.document())
 
-        # Add both containers to splitter
+        # Create merge control widget
+        self.merge_control_widget = MergeControlWidget()
+        self.merge_control_widget.merge_requested.connect(self._handle_merge_request)
+
+        # Add all three widgets to splitter (left, merge controls, right)
         self.editor_splitter.addWidget(self.left_editor_container)
+        self.editor_splitter.addWidget(self.merge_control_widget)
         self.editor_splitter.addWidget(self.right_editor_container)
-        self.editor_splitter.setSizes([600, 600])
+
+        # Set sizes: left=600, merge=30, right=600
+        self.editor_splitter.setSizes([600, 30, 600])
 
         # Style splitter
         self.editor_splitter.setStyleSheet("""
@@ -226,8 +356,9 @@ class NkScriptEditor(QtWidgets.QWidget):
             }
         """)
 
-        # Hide compare view by default
+        # Hide compare view and merge controls by default
         self.right_editor_container.setVisible(False)
+        self.merge_control_widget.setVisible(False)
         self.compare_visible = False
 
         # Add state tracking for diff
@@ -239,9 +370,19 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Setup scroll synchronization
         self._setup_scroll_sync()
 
-        # Connect to preserve diff highlighting when editors update selections
-        self.text_edit.cursorPositionChanged.connect(self._update_left_editor_selections)
-        self.compare_editor.cursorPositionChanged.connect(self._update_right_editor_selections)
+        # Connect to preserve diff highlighting when editors update selections or text changes
+        # Use lambda with QTimer to ensure it runs after CodeEditor's own highlight_current_line
+        self.text_edit.cursorPositionChanged.connect(
+            lambda: QtCore.QTimer.singleShot(0, self._update_left_editor_selections)
+        )
+        self.compare_editor.cursorPositionChanged.connect(
+            lambda: QtCore.QTimer.singleShot(0, self._update_right_editor_selections)
+        )
+
+        # Also update when text content changes (editing)
+        self.text_edit.textChanged.connect(
+            lambda: QtCore.QTimer.singleShot(0, self._update_left_editor_selections)
+        )
 
         # Add splitter to main layout
         editor_layout.addWidget(self.editor_splitter)
@@ -582,6 +723,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.compare_visible = not self.compare_visible
         self.right_editor_container.setVisible(self.compare_visible)
         self.compare_controls_widget.setVisible(self.compare_visible)
+        self.merge_control_widget.setVisible(self.compare_visible)
 
         # Update menu action text
         self.compare_action.setText("Hide Compare" if self.compare_visible else "Compare...")
@@ -617,6 +759,7 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.compare_visible = is_visible
             self.right_editor_container.setVisible(is_visible)
             self.compare_controls_widget.setVisible(is_visible)
+            self.merge_control_widget.setVisible(is_visible)
             self.compare_action.setText("Hide Compare" if is_visible else "Compare...")
 
             logger.debug(f"Compare visibility loaded: {is_visible}")
@@ -625,6 +768,7 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.compare_visible = False
             self.right_editor_container.setVisible(False)
             self.compare_controls_widget.setVisible(False)
+            self.merge_control_widget.setVisible(False)
 
     def save_compare_visibility_preference(self, is_visible):
         """Save compare visibility state to preferences."""
@@ -693,6 +837,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         left_line_types = {}  # Map: line_num -> type
         right_line_types = {}  # Map: line_num -> type
         self.diff_positions = []
+        self.diff_blocks = []  # Store diff blocks for merge controls
 
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
@@ -708,20 +853,31 @@ class NkScriptEditor(QtWidgets.QWidget):
                     self.diff_positions.append(idx)
                 for idx in range(j1, j2):
                     right_line_types[idx] = 'mod'
+                # Store for merge controls
+                self.diff_blocks.append((tag, i1, i2, j1, j2))
             elif tag == 'delete':
                 # Deleted lines - show as del on left only
                 for idx in range(i1, i2):
                     left_line_types[idx] = 'del'
                     self.diff_positions.append(idx)
+                # Store for merge controls
+                self.diff_blocks.append((tag, i1, i2, j1, j2))
             elif tag == 'insert':
                 # Added lines - show as add on right only
                 for idx in range(j1, j2):
                     right_line_types[idx] = 'add'
                     self.diff_positions.append(idx)
+                # Store for merge controls
+                self.diff_blocks.append((tag, i1, i2, j1, j2))
 
         # Apply highlighting to both editors (keeps original content in both)
         self._apply_diff_highlighting_to_left(left_line_types)
         self._apply_diff_highlighting_to_right(right_line_types)
+
+        # Update merge control buttons
+        self.merge_control_widget.set_diff_blocks(
+            self.diff_blocks, self.text_edit, self.compare_editor, self.left_editor_container
+        )
 
         # Update diff counter
         self.current_diff_index = -1
@@ -749,8 +905,14 @@ class NkScriptEditor(QtWidgets.QWidget):
                 selection = QtWidgets.QTextEdit.ExtraSelection()
                 selection.format.setBackground(colors[line_type])
                 selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+                # Mark this as a diff selection so we can identify it later
+                selection.format.setProperty(QtGui.QTextFormat.UserProperty, "diff_highlight")
 
-                cursor = QtGui.QTextCursor(self.text_edit.document().findBlockByNumber(line_num))
+                # Create cursor and select the entire line to highlight wrapped portions
+                block = self.text_edit.document().findBlockByNumber(line_num)
+                cursor = QtGui.QTextCursor(block)
+                cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
+                cursor.movePosition(QtGui.QTextCursor.EndOfBlock, QtGui.QTextCursor.KeepAnchor)
                 selection.cursor = cursor
                 self.diff_extra_selections.append(selection)
 
@@ -777,8 +939,14 @@ class NkScriptEditor(QtWidgets.QWidget):
                 selection = QtWidgets.QTextEdit.ExtraSelection()
                 selection.format.setBackground(colors[line_type])
                 selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+                # Mark this as a diff selection so we can identify it later
+                selection.format.setProperty(QtGui.QTextFormat.UserProperty, "diff_highlight")
 
-                cursor = QtGui.QTextCursor(self.compare_editor.document().findBlockByNumber(line_num))
+                # Create cursor and select the entire line to highlight wrapped portions
+                block = self.compare_editor.document().findBlockByNumber(line_num)
+                cursor = QtGui.QTextCursor(block)
+                cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
+                cursor.movePosition(QtGui.QTextCursor.EndOfBlock, QtGui.QTextCursor.KeepAnchor)
                 selection.cursor = cursor
                 self.diff_extra_selections_right.append(selection)
 
@@ -790,15 +958,14 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Get current extra selections from the editor (if any)
         current_selections = self.text_edit.extraSelections()
 
-        # Filter out old diff selections (they don't have specific markers, so we'll replace all)
-        # Keep only the first selection if it exists (usually current line highlight)
+        # Filter out old diff selections but keep all other selections (current line, errors, etc.)
         other_selections = []
-        if current_selections and len(current_selections) > 0:
-            # The CodeEditor typically puts current line highlight as first selection
-            # We'll keep it if it exists
-            other_selections = [current_selections[0]] if current_selections else []
+        for sel in current_selections:
+            # Keep selection if it's NOT marked as a diff highlight
+            if sel.format.property(QtGui.QTextFormat.UserProperty) != "diff_highlight":
+                other_selections.append(sel)
 
-        # Combine: other selections + diff selections
+        # Combine: other selections + new diff selections
         all_selections = other_selections + self.diff_extra_selections
 
         # Apply all selections
@@ -809,12 +976,14 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Get current extra selections from the editor (if any)
         current_selections = self.compare_editor.extraSelections()
 
-        # Keep only the first selection if it exists (usually current line highlight)
+        # Filter out old diff selections but keep all other selections (current line, errors, etc.)
         other_selections = []
-        if current_selections and len(current_selections) > 0:
-            other_selections = [current_selections[0]] if current_selections else []
+        for sel in current_selections:
+            # Keep selection if it's NOT marked as a diff highlight
+            if sel.format.property(QtGui.QTextFormat.UserProperty) != "diff_highlight":
+                other_selections.append(sel)
 
-        # Combine: other selections + diff selections
+        # Combine: other selections + new diff selections
         all_selections = other_selections + self.diff_extra_selections_right
 
         # Apply all selections
@@ -871,6 +1040,58 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.text_edit.setTextCursor(cursor)
             self.text_edit.centerCursor()
 
+    def _handle_merge_request(self, tag, i1, i2, j1, j2):
+        """Handle merge button click - copy changes from right to left.
+
+        Args:
+            tag: Diff type ('insert', 'delete', 'replace')
+            i1, i2: Line range in left editor
+            j1, j2: Line range in right editor
+        """
+        # Check if merge involves many lines and confirm with user
+        num_lines = abs(i2 - i1) if tag in ('delete', 'replace') else abs(j2 - j1)
+        if num_lines > 10:
+            msg = f"This will merge {num_lines} lines. Continue?"
+            reply = QtWidgets.QMessageBox.question(
+                self, "Confirm Merge", msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+            if reply == QtWidgets.QMessageBox.No:
+                logger.info("Merge cancelled by user")
+                return
+
+        # Get current text from both editors
+        left_lines = self.text_edit.toPlainText().splitlines(keepends=True)
+        right_lines = self.compare_editor.toPlainText().splitlines(keepends=True)
+
+        # Ensure lines end with newline for proper joining
+        if left_lines and not left_lines[-1].endswith('\n'):
+            left_lines[-1] += '\n'
+        if right_lines and not right_lines[-1].endswith('\n'):
+            right_lines[-1] += '\n'
+
+        # Perform merge based on tag type
+        if tag == 'insert':
+            # Insert lines from right into left at position i1
+            new_lines = left_lines[:i1] + right_lines[j1:j2] + left_lines[i1:]
+        elif tag == 'delete':
+            # Remove lines from left (accept deletion)
+            new_lines = left_lines[:i1] + left_lines[i2:]
+        elif tag == 'replace':
+            # Replace lines in left with lines from right
+            new_lines = left_lines[:i1] + right_lines[j1:j2] + left_lines[i2:]
+        else:
+            logger.warning(f"Unknown diff tag: {tag}")
+            return
+
+        # Update left editor with merged content
+        self.text_edit.setPlainText(''.join(new_lines))
+
+        # Recompute diff after merge (with slight delay to let UI update)
+        QtCore.QTimer.singleShot(100, self.compute_inline_diff)
+
+        logger.info(f"Merged {tag} block: left[{i1}:{i2}] <- right[{j1}:{j2}]")
+
     def _setup_scroll_sync(self):
         """Setup synchronized scrolling between left and right editors."""
         # Vertical scroll sync
@@ -884,6 +1105,11 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.compare_editor.horizontalScrollBar().setValue)
         self.compare_editor.horizontalScrollBar().valueChanged.connect(
             self.text_edit.horizontalScrollBar().setValue)
+
+        # Update merge button positions on vertical scroll
+        self.text_edit.verticalScrollBar().valueChanged.connect(
+            lambda: self.merge_control_widget.update_positions(self.text_edit)
+        )
 
     def clear_compare_view(self):
         """Clear the compare editor and reset diff state."""
@@ -985,6 +1211,10 @@ class NkScriptEditor(QtWidgets.QWidget):
                     # Trigger auto-validation via timer
                     self.validation_timer.stop()
                     self.validation_timer.start()
+
+                    # Auto-compute diff if compare view is visible
+                    if self.compare_visible and self.compare_editor.toPlainText().strip():
+                        self.compute_inline_diff()
             except Exception as e:
                 msg = f"Nk file could not be loaded:\n{e}"
                 logger.error(msg)
@@ -1037,6 +1267,10 @@ class NkScriptEditor(QtWidgets.QWidget):
             # Trigger auto-validation via timer
             self.validation_timer.stop()
             self.validation_timer.start()
+
+            # Auto-compute diff if compare view is visible
+            if self.compare_visible and self.compare_editor.toPlainText().strip():
+                self.compute_inline_diff()
 
     def load_root_into_editor(self):
         """Load the root Nuke script path into the editor if available."""

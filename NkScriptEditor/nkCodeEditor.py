@@ -42,7 +42,7 @@ class LineNumberArea(QtWidgets.QWidget):
 
     def sizeHint(self):
         """Return the preferred width of the line number area."""
-        return QSize(self.code_editor.line_number_area_width(), 0)
+        return QtCore.QSize(self.code_editor.line_number_area_width(), 0)
 
     def paintEvent(self, event):
         """Delegate painting of line numbers to the parent CodeEditor."""
@@ -78,6 +78,20 @@ class LineNumberArea(QtWidgets.QWidget):
                 top = bottom
                 bottom = top + editor.blockBoundingRect(block).height()
                 block_number += 1
+
+
+class NoBreakpointLineNumberArea(LineNumberArea):
+    """
+    Line number area that disables breakpoint toggling (for read-only compare editors).
+
+    This class inherits from LineNumberArea but overrides mousePressEvent to prevent
+    any breakpoint toggling functionality. Useful for read-only code editors where
+    breakpoint manipulation should not be allowed.
+    """
+
+    def mousePressEvent(self, event):
+        """Override to prevent breakpoint toggling - ignore all clicks."""
+        event.ignore()
 
 
 class CodeEditor(QtWidgets.QPlainTextEdit):
@@ -381,6 +395,20 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         self.active_debug_point = None
         self.line_number_area.update()
         logger.debug(f"Debug points removed.")
+
+    def disable_breakpoints(self):
+        """Replace line number area with one that doesn't support breakpoints.
+
+        This method is useful for read-only editors (like compare views) where
+        breakpoint toggling should be disabled. It replaces the standard LineNumberArea
+        with NoBreakpointLineNumberArea which ignores mouse clicks.
+        """
+        # Replace the line number area with non-breakpoint version
+        self.line_number_area = NoBreakpointLineNumberArea(self)
+        # Force redraw to ensure proper layout
+        self.update_line_number_area_width(0)
+        self.update()
+        logger.debug("Breakpoints disabled for this editor.")
 
     def get_next_debug_point(self):
         """Return the next debug point after the active one, or the first if none is active.
