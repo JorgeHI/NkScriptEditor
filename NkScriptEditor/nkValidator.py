@@ -358,7 +358,6 @@ def validate_node_definitions(script_text):
 
     # Track current node being processed
     current_node_type = None
-    current_node_start_line = None
     structural_brace_depth = 0
 
     for line_num, line in enumerate(lines, start=1):
@@ -366,11 +365,18 @@ def validate_node_definitions(script_text):
         if not line.strip():
             continue
 
+        # Check for end_group keyword (Nuke-specific way to close Groups)
+        if line.strip() == 'end_group':
+            if scope_tracker.scope_stack and len(scope_tracker.scope_stack) > 1:
+                scope_tracker.exit_group()
+                logger.debug(f"[VALIDATION] Exited Group via end_group at line {line_num}")
+                logger.debug(f"  Scope now: {scope_tracker.get_scope_path()}")
+            continue
+
         # Check for node start
         node_match = node_start_pattern.match(line)
         if node_match and structural_brace_depth == 0:
             current_node_type = node_match.group(1)
-            current_node_start_line = line_num
             structural_brace_depth = 1
 
             # Special handling for Group nodes
@@ -415,11 +421,13 @@ def validate_node_definitions(script_text):
 
                             # Exiting a node
                             if structural_brace_depth == 0:
-                                # Check if we're exiting a Group
+                                # NOTE: For Group nodes, we DON'T exit the scope here!
+                                # The closing brace only closes the Group's knob definitions.
+                                # The Group's child nodes come AFTER this brace.
+                                # We only exit the Group scope when we see 'end_group' keyword.
                                 if current_node_type == 'Group':
-                                    scope_tracker.exit_group()
-                                    logger.debug(f"[VALIDATION] Exiting Group at line {line_num}")
-                                    logger.debug(f"  Scope now: {scope_tracker.get_scope_path()}")
+                                    logger.debug(f"[VALIDATION] Closed Group knob block at line {line_num}")
+                                    logger.debug(f"  Group scope '{scope_tracker.scope_stack[-1].group_name}' remains active")
                                 current_node_type = None
                                 break
 
@@ -431,13 +439,7 @@ def validate_node_definitions(script_text):
                 if name_match:
                     node_name = name_match.group(1)
 
-                    # If this is a Group node, enter its scope
-                    if current_node_type == 'Group':
-                        scope_tracker.enter_group(node_name, line_num)
-                        logger.debug(f"[VALIDATION] Entered Group scope '{node_name}' at line {line_num}")
-                        logger.debug(f"  Full scope: {scope_tracker.get_scope_path()}")
-
-                    # Check for duplicate names in current scope
+                    # Check for duplicate names in current scope (BEFORE entering group if it's a Group)
                     duplicate_line = scope_tracker.register_node_name(node_name, line_num)
                     if duplicate_line:
                         scope_path = scope_tracker.get_scope_path()
@@ -451,6 +453,12 @@ def validate_node_definitions(script_text):
                         logger.warning(f"  Current scope: {scope_path}")
                     else:
                         logger.debug(f"[VALIDATION] Registered node '{node_name}' in scope '{scope_tracker.get_scope_path()}' at line {line_num}")
+
+                    # If this is a Group node, NOW enter its scope (after registering the Group's name in parent scope)
+                    if current_node_type == 'Group':
+                        scope_tracker.enter_group(node_name, line_num)
+                        logger.debug(f"[VALIDATION] Entered Group scope '{node_name}' at line {line_num}")
+                        logger.debug(f"  Full scope: {scope_tracker.get_scope_path()}")
 
     return errors
 
