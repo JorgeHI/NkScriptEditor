@@ -449,6 +449,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.validation_timer.setSingleShot(True)
         self.validation_timer.setInterval(500)
         self.validation_timer.timeout.connect(self._on_validation_timer)
+        self.validation_enabled = True  # Validation enabled by default
 
         # -- Status bar counters
         self.node_count = 0
@@ -504,7 +505,7 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # -- Status Bar
         self.status_bar_layout = QtWidgets.QHBoxLayout()
-        self.error_counter_label = QtWidgets.QLabel("⚠ 0 errors")
+        self.error_counter_label = QtWidgets.QLabel("⊗ 0 errors")
         self.error_counter_label.setStyleSheet("color: gray; padding: 2px 8px;")
         self.error_counter_label.setToolTip("Number of validation errors")
         self.warning_counter_label = QtWidgets.QLabel("⚠ 0 warnings")
@@ -563,6 +564,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Preference signals
         self.prefs_page.wrapTextToggled.connect(self.toggle_wrap_text)
         self.prefs_page.showEncodingToggled.connect(self.toggle_encoding_visibility)
+        self.prefs_page.validationToggled.connect(self.toggle_validation)
         self.prefs_page.apply_preferences.connect(self.highlighter.update_formats)
         # Debug button connections
         self.debug_clear_button.clicked.connect(self.text_edit.clean_all_debug_points)
@@ -597,6 +599,9 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         # Load compare visibility preference
         self.load_compare_visibility_preference()
+
+        # Load validation preference
+        self.load_validation_preference()
 
     def _create_file_selector(self, placeholder_text, load_button_text=None):
         """
@@ -769,6 +774,28 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.right_editor_container.setVisible(False)
             self.compare_controls_widget.setVisible(False)
             self.merge_control_widget.setVisible(False)
+
+    def load_validation_preference(self):
+        """Load validation enabled state from preferences on startup."""
+        try:
+            if os.path.isfile(nkConstants.pref_filepath):
+                with open(nkConstants.pref_filepath, 'r') as f:
+                    prefs = json.load(f)
+                is_enabled = prefs.get("enable_validation", True)  # Default to enabled
+            else:
+                is_enabled = True  # Default to enabled
+
+            # Apply validation state
+            self.validation_enabled = is_enabled
+            # Update the checkbox in preferences to match
+            self.prefs_page.enable_validation_checkbox.setChecked(is_enabled)
+
+            logger.debug(f"Validation enabled state loaded from preferences: {is_enabled}")
+        except Exception as e:
+            logger.error(f"Failed to load validation preference: {e}")
+            # Default to enabled on error
+            self.validation_enabled = True
+            self.prefs_page.enable_validation_checkbox.setChecked(True)
 
     def save_compare_visibility_preference(self, is_visible):
         """Save compare visibility state to preferences."""
@@ -1241,6 +1268,25 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.encoding_combo.setCurrentText("utf-8")
         logger.debug(f"Encoding selector {'shown' if show else 'hidden'}")
 
+    def toggle_validation(self, enabled):
+        """
+        Enable or disable automatic script validation.
+
+        Args:
+            enabled (bool): True to enable validation, False to disable it
+        """
+        self.validation_enabled = enabled
+        if enabled:
+            # Re-run validation immediately if enabling
+            self.validation_timer.start()
+        else:
+            # Clear any existing validation errors when disabling
+            self.text_edit.clear_validation_errors()
+            self.error_count = 0
+            self.warning_count = 0
+            self._update_status_bar()
+        logger.debug(f"Validation {'enabled' if enabled else 'disabled'}")
+
     def get_nodegraph_script(self):
         try:
             import tempfile
@@ -1582,6 +1628,10 @@ class NkScriptEditor(QtWidgets.QWidget):
 
         Performs validation silently without showing success messages.
         """
+        # Skip validation if disabled
+        if not self.validation_enabled:
+            return
+
         current_text = self.text_edit.toPlainText()
         if current_text.strip():
             self._run_validation_silent()
@@ -1649,7 +1699,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         - Node counter (always visible)
         """
         # Update error counter
-        error_text = f"⚠ {self.error_count} error{'s' if self.error_count != 1 else ''}"
+        error_text = f"⊗ {self.error_count} error{'s' if self.error_count != 1 else ''}"
         if self.error_count > 0:
             self.error_counter_label.setStyleSheet("color: #ff5050; font-weight: bold; padding: 2px 8px;")
         else:
