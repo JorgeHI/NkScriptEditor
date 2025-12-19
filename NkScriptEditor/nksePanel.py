@@ -139,13 +139,38 @@ class MergeControlWidget(QtWidgets.QWidget):
         return 0
 
     def _get_tooltip(self, tag, i1, i2, j1, j2):
-        """Generate tooltip text for merge button."""
+        """Generate tooltip text for merge button with explicit line numbers."""
+        # Convert to 1-indexed line numbers for display
+        left_start = i1 + 1
+        left_end = i2
+        right_start = j1 + 1
+        right_end = j2
+
         if tag == 'insert':
-            return f"Accept {j2-j1} added line(s) from right"
+            # Adding lines from right to left
+            if j2 - j1 == 1:
+                return f"Move line {right_start} to {left_start}"
+            else:
+                return f"Move lines {right_start}-{right_end} to {left_start}-{left_start + (right_end - right_start)}"
         elif tag == 'delete':
-            return f"Accept deletion of {i2-i1} line(s)"
+            # Deleting lines from left
+            if i2 - i1 == 1:
+                return f"Delete line {left_start}"
+            else:
+                return f"Delete lines {left_start}-{left_end}"
         elif tag == 'replace':
-            return f"Replace {i2-i1} line(s) with {j2-j1} from right"
+            # Replacing lines in left with lines from right
+            if i2 - i1 == 1:
+                left_desc = f"line {left_start}"
+            else:
+                left_desc = f"lines {left_start}-{left_end}"
+
+            if j2 - j1 == 1:
+                right_desc = f"line {right_start}"
+            else:
+                right_desc = f"lines {right_start}-{right_end}"
+
+            return f"Replace {left_desc} with {right_desc}"
         return "Merge change"
 
     def update_positions(self, left_editor):
