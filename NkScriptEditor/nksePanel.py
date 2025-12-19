@@ -789,6 +789,9 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.validation_enabled = is_enabled
             # Update the checkbox in preferences to match
             self.prefs_page.enable_validation_checkbox.setChecked(is_enabled)
+            # Show/hide counters based on validation state
+            self.error_counter_label.setVisible(is_enabled)
+            self.warning_counter_label.setVisible(is_enabled)
 
             logger.debug(f"Validation enabled state loaded from preferences: {is_enabled}")
         except Exception as e:
@@ -796,6 +799,8 @@ class NkScriptEditor(QtWidgets.QWidget):
             # Default to enabled on error
             self.validation_enabled = True
             self.prefs_page.enable_validation_checkbox.setChecked(True)
+            self.error_counter_label.setVisible(True)
+            self.warning_counter_label.setVisible(True)
 
     def save_compare_visibility_preference(self, is_visible):
         """Save compare visibility state to preferences."""
@@ -1277,6 +1282,9 @@ class NkScriptEditor(QtWidgets.QWidget):
         """
         self.validation_enabled = enabled
         if enabled:
+            # Show error and warning counters
+            self.error_counter_label.setVisible(True)
+            self.warning_counter_label.setVisible(True)
             # Re-run validation immediately if enabling
             self.validation_timer.start()
         else:
@@ -1285,6 +1293,9 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.error_count = 0
             self.warning_count = 0
             self._update_status_bar()
+            # Hide error and warning counters
+            self.error_counter_label.setVisible(False)
+            self.warning_counter_label.setVisible(False)
         logger.debug(f"Validation {'enabled' if enabled else 'disabled'}")
 
     def get_nodegraph_script(self):
@@ -1571,7 +1582,12 @@ class NkScriptEditor(QtWidgets.QWidget):
         Note:
             This method is kept for backward compatibility and manual validation.
             Auto-validation is now handled by _run_validation_silent().
+            Manual validation always shows counters, even if automatic validation is disabled.
         """
+        # Show counters for manual validation (even if auto-validation is disabled)
+        self.error_counter_label.setVisible(True)
+        self.warning_counter_label.setVisible(True)
+
         current_text = self.text_edit.toPlainText()
         if not current_text.strip():
             self.text_edit.clear_validation_errors()
