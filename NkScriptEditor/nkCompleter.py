@@ -288,8 +288,16 @@ class CompletionPopup(QtWidgets.QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
-        self.setFocusPolicy(QtCore.Qt.NoFocus)
+        # Use Qt.Tool instead of Qt.Popup to prevent aggressive auto-hiding
+        # Qt.Popup can close unexpectedly on focus events
+        self.setWindowFlags(
+            QtCore.Qt.Tool |
+            QtCore.Qt.FramelessWindowHint |
+            QtCore.Qt.WindowStaysOnTopHint
+        )
+        # Use ClickFocus so the popup can receive mouse clicks
+        # but won't steal focus from editor on keyboard navigation
+        self.setFocusPolicy(QtCore.Qt.ClickFocus)
         self.setMouseTracking(True)
 
         # Styling
@@ -319,7 +327,9 @@ class CompletionPopup(QtWidgets.QListWidget):
 
     def _on_item_clicked(self, item):
         """Handle item click."""
-        self.completionSelected.emit(item.data(QtCore.Qt.UserRole) or item.text())
+        completion_text = item.data(QtCore.Qt.UserRole) or item.text()
+        print(f"[AUTOCOMPLETE] Item clicked: {completion_text}")
+        self.completionSelected.emit(completion_text)
         self.hide()
 
     def keyPressEvent(self, event):
@@ -366,7 +376,7 @@ class CompletionPopup(QtWidgets.QListWidget):
 # Autocomplete Manager
 # =============================================================================
 
-class AutocompleteManager:
+class AutocompleteManager(QtCore.QObject):
     """
     Manages autocomplete for a code editor.
 
@@ -379,11 +389,15 @@ class AutocompleteManager:
         Args:
             editor: The CodeEditor widget to attach to
         """
+        super(AutocompleteManager, self).__init__(editor)
         self.editor = editor
         self.popup = CompletionPopup()
         self.popup.completionSelected.connect(self._insert_completion)
         self.enabled = True
         self.min_chars = 2  # Minimum characters before showing completions
+
+        # Install event filter to handle clicks outside popup
+        self.editor.installEventFilter(self)
 
     def _get_completions(self, context, prefix):
         """
@@ -467,18 +481,24 @@ class AutocompleteManager:
         global_pos = self.editor.mapToGlobal(cursor_rect.bottomLeft())
         self.popup.move(global_pos)
         self.popup.show()
+        self.popup.raise_()  # Bring to front
+        print(f"[AUTOCOMPLETE] Popup shown with {len(completions)} completions")
 
     def _insert_completion(self, text):
         """Insert the selected completion."""
+        print(f"[AUTOCOMPLETE] _insert_completion called with text: {text}")
         cursor = self.editor.textCursor()
+        print(f"[AUTOCOMPLETE] Cursor position before: {cursor.position()}")
 
         # Remove the prefix that was already typed
         cursor.movePosition(QtGui.QTextCursor.StartOfWord, QtGui.QTextCursor.KeepAnchor)
         cursor.removeSelectedText()
+        print(f"[AUTOCOMPLETE] Cursor position after removing prefix: {cursor.position()}")
 
         # Insert completion
         cursor.insertText(text)
         self.editor.setTextCursor(cursor)
+        print(f"[AUTOCOMPLETE] Inserted completion text: {text}")
 
     def handle_key_press(self, event):
         """
@@ -491,6 +511,7 @@ class AutocompleteManager:
             return False
 
         key = event.key()
+        print(f"[AUTOCOMPLETE] handle_key_press: key={key}, Key_Return={QtCore.Qt.Key_Return}, Key_Tab={QtCore.Qt.Key_Tab}")
 
         if key == QtCore.Qt.Key_Down:
             self.popup.move_selection(1)
@@ -500,8 +521,13 @@ class AutocompleteManager:
             return True
         elif key in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Tab):
             current = self.popup.currentItem()
+            print(f"[AUTOCOMPLETE] Return/Tab pressed, current item: {current}")
             if current:
-                self._insert_completion(current.data(QtCore.Qt.UserRole) or current.text())
+                completion_text = current.data(QtCore.Qt.UserRole) or current.text()
+                print(f"[AUTOCOMPLETE] Completion text to insert: {completion_text}")
+                self._insert_completion(completion_text)
+            else:
+                print("[AUTOCOMPLETE] WARNING: No current item selected in popup")
             self.popup.hide()
             return True
         elif key == QtCore.Qt.Key_Escape:
@@ -517,3 +543,19 @@ class AutocompleteManager:
     def is_popup_visible(self):
         """Check if popup is visible."""
         return self.popup.isVisible()
+
+    def eventFilter(self, obj, event):
+        """
+        Filter events on the editor to handle clicks outside popup.
+
+        This closes the popup when user clicks in the editor outside
+        the popup area while it's visible.
+        """
+        if obj == self.editor and event.type() == QtCore.QEvent.MouseButtonPress:
+            if self.popup.isVisible():
+                # Get click position in global coordinates
+                global_pos = self.editor.mapToGlobal(event.pos())
+                # Check if click is outside popup
+                if not self.popup.geometry().contains(self.popup.mapFromGlobal(global_pos)):
+                    self.popup.hide()
+        return False  # Don't filter the event, let it continue
