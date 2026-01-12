@@ -65,7 +65,7 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         self.show_encoding_checkbox.setToolTip("Show/hide the encoding combobox in the editor (defaults to UTF-8 when hidden)")
         textEdit_pref_layout.addWidget(self.show_encoding_checkbox)
         # Enable validation checkbox
-        self.enable_validation_checkbox = QtWidgets.QCheckBox("Enable script validation (Beta)")
+        self.enable_validation_checkbox = QtWidgets.QCheckBox("Enable script validation")
         self.enable_validation_checkbox.setChecked(False)  # Enabled by default
         self.enable_validation_checkbox.setToolTip("Enable/disable automatic script validation (checks for syntax errors and warnings)")
         textEdit_pref_layout.addWidget(self.enable_validation_checkbox)

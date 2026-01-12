@@ -260,7 +260,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.actions_menu = QtWidgets.QMenu(self.menu_button)
         self.validate_action = self.actions_menu.addAction("Validate Script")
         self.validate_action.setToolTip("Check script structure for errors")
-        self.compare_action = self.actions_menu.addAction("Compare...")
+        self.compare_action = self.actions_menu.addAction("Compare... (Beta)")
         self.compare_action.setToolTip("Compare current script with another .nk file")
         self.actions_menu.addSeparator()
         self.debug_toggle_action = self.actions_menu.addAction("Show Debug")
@@ -392,22 +392,28 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.diff_extra_selections = []  # Store diff highlights for left editor
         self.diff_extra_selections_right = []  # Store diff highlights for right editor
 
+        # Recursion guards for scroll sync
+        self._syncing_scroll = False
+
+        # Diff computation debounce timer (300ms)
+        self.diff_timer = QtCore.QTimer()
+        self.diff_timer.setSingleShot(True)
+        self.diff_timer.setInterval(300)
+        self.diff_timer.timeout.connect(self._compute_diff_now)
+
+        # Store validation state when entering compare mode
+        self._saved_validation_errors = None
+
         # Setup scroll synchronization
         self._setup_scroll_sync()
 
         # Connect to preserve diff highlighting when editors update selections or text changes
-        # Use lambda with QTimer to ensure it runs after CodeEditor's own highlight_current_line
-        self.text_edit.cursorPositionChanged.connect(
-            lambda: QtCore.QTimer.singleShot(0, self._update_left_editor_selections)
-        )
-        self.compare_editor.cursorPositionChanged.connect(
-            lambda: QtCore.QTimer.singleShot(0, self._update_right_editor_selections)
-        )
+        # Only runs when compare mode is active to avoid unnecessary refreshes
+        self.text_edit.cursorPositionChanged.connect(self._on_left_cursor_changed)
+        self.compare_editor.cursorPositionChanged.connect(self._on_right_cursor_changed)
 
-        # Also update when text content changes (editing)
-        self.text_edit.textChanged.connect(
-            lambda: QtCore.QTimer.singleShot(0, self._update_left_editor_selections)
-        )
+        # Also update when text content changes (editing) - only in compare mode
+        self.text_edit.textChanged.connect(self._on_left_text_changed)
 
         # Add splitter to main layout
         editor_layout.addWidget(self.editor_splitter)
@@ -756,20 +762,48 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.merge_control_widget.setVisible(self.compare_visible)
 
         # Update menu action text
-        self.compare_action.setText("Hide Compare" if self.compare_visible else "Compare...")
+        self.compare_action.setText("Hide Compare" if self.compare_visible else "Compare... (Beta)")
 
-        # If showing, trigger diff computation if both texts are available
+        # Coordinate validation and compare mode to avoid interference
         if self.compare_visible:
+            # ENTERING COMPARE MODE
+
+            # 1. Disable automatic highlighting in both editors
+            # This prevents competing setExtraSelections() calls and eliminates flicker
+            self.text_edit.disable_automatic_highlighting()
+            self.compare_editor.disable_automatic_highlighting()
+
+            # 2. Save and clear validation errors (keep existing logic)
+            self._saved_validation_errors = self.text_edit.validation_errors.copy()
+            self.text_edit.validation_errors = {}
+
+            # 3. Apply base selections (no diff yet) - nksePanel takes full control
+            self._apply_combined_selections()
+
+            # 4. Compute diff if both texts available
             left_text = self.text_edit.toPlainText()
             right_text = self.compare_editor.toPlainText()
             if left_text.strip() and right_text.strip():
-                self.compute_inline_diff()
+                self.compute_inline_diff(immediate=True)
         else:
-            # If hiding, clear diff highlighting from both editors
+            # EXITING COMPARE MODE
+
+            # 1. Re-enable automatic highlighting in both editors
+            self.text_edit.enable_automatic_highlighting()
+            self.compare_editor.enable_automatic_highlighting()
+
+            # 2. Clear diff selections
             self.diff_extra_selections = []
             self.diff_extra_selections_right = []
-            self._update_left_editor_selections()
-            self._update_right_editor_selections()
+
+            # 3. Restore validation errors
+            if self._saved_validation_errors is not None:
+                self.text_edit.validation_errors = self._saved_validation_errors
+                self._saved_validation_errors = None
+
+            # 4. Trigger normal refresh (automatic highlighting is now back on)
+            self.text_edit._refresh_display()
+            self.compare_editor._refresh_display()
 
         # Save preference
         self.save_compare_visibility_preference(self.compare_visible)
@@ -790,7 +824,7 @@ class NkScriptEditor(QtWidgets.QWidget):
             self.right_editor_container.setVisible(is_visible)
             self.compare_controls_widget.setVisible(is_visible)
             self.merge_control_widget.setVisible(is_visible)
-            self.compare_action.setText("Hide Compare" if is_visible else "Compare...")
+            self.compare_action.setText("Hide Compare" if is_visible else "Compare... (Beta)")
 
             logger.debug(f"Compare visibility loaded: {is_visible}")
         except Exception as e:
@@ -875,8 +909,23 @@ class NkScriptEditor(QtWidgets.QWidget):
         else:
             nuke.message(f"The filepath '{file_path}' does not exist.")
 
-    def compute_inline_diff(self):
-        """Compute and display diff between left and right editors."""
+    def compute_inline_diff(self, immediate=False):
+        """
+        Schedule diff computation between left and right editors.
+
+        Args:
+            immediate (bool): If True, compute diff immediately without debouncing.
+                             If False, debounce the computation (300ms delay).
+        """
+        if immediate:
+            self._compute_diff_now()
+        else:
+            # Debounce: restart timer on each call
+            self.diff_timer.stop()
+            self.diff_timer.start()
+
+    def _compute_diff_now(self):
+        """Compute and display diff between left and right editors (internal)."""
         left_text = self.text_edit.toPlainText()
         right_text = self.compare_editor.toPlainText()
 
@@ -973,8 +1022,8 @@ class NkScriptEditor(QtWidgets.QWidget):
                 selection.cursor = cursor
                 self.diff_extra_selections.append(selection)
 
-        # Merge with existing extra selections (like current line highlight)
-        self._update_left_editor_selections()
+        # Apply combined selections once
+        self._apply_combined_selections()
 
     def _apply_diff_highlighting_to_right(self, line_types_dict):
         """Apply diff highlighting to the right (compare) editor.
@@ -1007,44 +1056,48 @@ class NkScriptEditor(QtWidgets.QWidget):
                 selection.cursor = cursor
                 self.diff_extra_selections_right.append(selection)
 
-        # Merge with existing extra selections (like current line highlight)
-        self._update_right_editor_selections()
+        # Apply combined selections once
+        self._apply_combined_selections()
 
-    def _update_left_editor_selections(self):
-        """Update left editor selections, merging diff highlights with existing selections."""
-        # Get current extra selections from the editor (if any)
-        current_selections = self.text_edit.extraSelections()
+    def _on_left_cursor_changed(self):
+        """Handle left editor cursor changes - only update if compare mode is active."""
+        if self.compare_visible:
+            # Don't use QTimer - apply immediately since automatic highlighting is disabled
+            self._apply_combined_selections()
 
-        # Filter out old diff selections but keep all other selections (current line, errors, etc.)
-        other_selections = []
-        for sel in current_selections:
-            # Keep selection if it's NOT marked as a diff highlight
-            if sel.format.property(QtGui.QTextFormat.UserProperty) != "diff_highlight":
-                other_selections.append(sel)
+    def _on_right_cursor_changed(self):
+        """Handle right editor cursor changes - only update if compare mode is active."""
+        if self.compare_visible:
+            # Don't use QTimer - apply immediately since automatic highlighting is disabled
+            self._apply_combined_selections()
 
-        # Combine: other selections + new diff selections
-        all_selections = other_selections + self.diff_extra_selections
+    def _on_left_text_changed(self):
+        """Handle left editor text changes - trigger diff recomputation."""
+        if self.compare_visible:
+            # Text changed - recompute diff with debounce
+            self.compute_inline_diff(immediate=False)
 
-        # Apply all selections
-        self.text_edit.setExtraSelections(all_selections)
+    def _apply_combined_selections(self):
+        """
+        Apply combined selections (base + diff) in compare mode.
 
-    def _update_right_editor_selections(self):
-        """Update right editor selections, merging diff highlights with existing selections."""
-        # Get current extra selections from the editor (if any)
-        current_selections = self.compare_editor.extraSelections()
+        This is the ONLY method that calls setExtraSelections() in compare mode.
+        It coordinates base selections (error line, validation, current line) from
+        nkCodeEditor with diff highlights managed by nksePanel.
 
-        # Filter out old diff selections but keep all other selections (current line, errors, etc.)
-        other_selections = []
-        for sel in current_selections:
-            # Keep selection if it's NOT marked as a diff highlight
-            if sel.format.property(QtGui.QTextFormat.UserProperty) != "diff_highlight":
-                other_selections.append(sel)
+        This unified approach prevents competing setExtraSelections() calls and
+        eliminates flicker from redundant updates.
+        """
+        if not self.compare_visible:
+            return
 
-        # Combine: other selections + new diff selections
-        all_selections = other_selections + self.diff_extra_selections_right
+        # LEFT EDITOR: Get base selections from nkCodeEditor, combine with diff
+        base_left = self.text_edit.get_base_selections()
+        all_left = base_left + self.diff_extra_selections
+        self.text_edit.setExtraSelections(all_left)
 
-        # Apply all selections
-        self.compare_editor.setExtraSelections(all_selections)
+        # RIGHT EDITOR: Only diff selections (read-only, no current line needed)
+        self.compare_editor.setExtraSelections(self.diff_extra_selections_right)
 
     def _update_diff_counter(self):
         """Update diff counter label."""
@@ -1142,31 +1195,77 @@ class NkScriptEditor(QtWidgets.QWidget):
             return
 
         # Update left editor with merged content
+        # CRITICAL: Temporarily disconnect text change handler to prevent premature diff update
+        # This prevents the race condition where automatic highlighting (if it were enabled)
+        # would wipe out diff selections before we recompute them
+        self.text_edit.textChanged.disconnect(self._on_left_text_changed)
         self.text_edit.setPlainText(''.join(new_lines))
+        self.text_edit.textChanged.connect(self._on_left_text_changed)
 
-        # Recompute diff after merge (with slight delay to let UI update)
-        QtCore.QTimer.singleShot(100, self.compute_inline_diff)
+        # Recompute diff immediately (no delay needed - automatic highlighting is disabled)
+        self.compute_inline_diff(immediate=True)
 
         logger.info(f"Merged {tag} block: left[{i1}:{i2}] <- right[{j1}:{j2}]")
 
     def _setup_scroll_sync(self):
-        """Setup synchronized scrolling between left and right editors."""
-        # Vertical scroll sync
+        """Setup synchronized scrolling between left and right editors with recursion guards."""
+        # Vertical scroll sync with recursion guard
         self.text_edit.verticalScrollBar().valueChanged.connect(
-            self.compare_editor.verticalScrollBar().setValue)
+            lambda value: self._sync_scroll_vertical(value, to_right=True))
         self.compare_editor.verticalScrollBar().valueChanged.connect(
-            self.text_edit.verticalScrollBar().setValue)
+            lambda value: self._sync_scroll_vertical(value, to_right=False))
 
-        # Horizontal scroll sync
+        # Horizontal scroll sync with recursion guard
         self.text_edit.horizontalScrollBar().valueChanged.connect(
-            self.compare_editor.horizontalScrollBar().setValue)
+            lambda value: self._sync_scroll_horizontal(value, to_right=True))
         self.compare_editor.horizontalScrollBar().valueChanged.connect(
-            self.text_edit.horizontalScrollBar().setValue)
+            lambda value: self._sync_scroll_horizontal(value, to_right=False))
 
-        # Update merge button positions on vertical scroll
+        # Update merge button positions on vertical scroll (throttled)
         self.text_edit.verticalScrollBar().valueChanged.connect(
-            lambda: self.merge_control_widget.update_positions(self.text_edit)
+            self._on_scroll_for_merge_buttons
         )
+
+    def _sync_scroll_vertical(self, value, to_right):
+        """Sync vertical scroll with recursion guard."""
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        try:
+            if to_right:
+                self.compare_editor.verticalScrollBar().setValue(value)
+            else:
+                self.text_edit.verticalScrollBar().setValue(value)
+        finally:
+            self._syncing_scroll = False
+
+    def _sync_scroll_horizontal(self, value, to_right):
+        """Sync horizontal scroll with recursion guard."""
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        try:
+            if to_right:
+                self.compare_editor.horizontalScrollBar().setValue(value)
+            else:
+                self.text_edit.horizontalScrollBar().setValue(value)
+        finally:
+            self._syncing_scroll = False
+
+    def _on_scroll_for_merge_buttons(self):
+        """Handle scroll events for merge button positioning (throttled)."""
+        # Only update if compare mode is visible
+        if self.compare_visible:
+            # Use QTimer to throttle updates (50ms delay)
+            if not hasattr(self, '_merge_button_timer'):
+                self._merge_button_timer = QtCore.QTimer()
+                self._merge_button_timer.setSingleShot(True)
+                self._merge_button_timer.setInterval(50)
+                self._merge_button_timer.timeout.connect(
+                    lambda: self.merge_control_widget.update_positions(self.text_edit)
+                )
+            self._merge_button_timer.stop()
+            self._merge_button_timer.start()
 
     def clear_compare_view(self):
         """Clear the compare editor and reset diff state."""
@@ -1688,6 +1787,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         Run validation without user messages.
 
         Updates error/warning counts and node count, then refreshes the status bar.
+        If compare mode is active, validation is performed but not displayed (saved for later).
         """
         current_text = self.text_edit.toPlainText()
 
@@ -1702,6 +1802,12 @@ class NkScriptEditor(QtWidgets.QWidget):
         # Update counters
         self.error_count = error_count
         self.warning_count = warning_count
+
+        # If compare mode is active, save validation errors but don't display them
+        if self.compare_visible:
+            self._saved_validation_errors = self.text_edit.validation_errors.copy()
+            self.text_edit.validation_errors = {}  # Clear display
+            self.text_edit._refresh_display()
 
         # Update status bar display
         self._update_status_bar()

@@ -108,6 +108,11 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
     """
     def __init__(self):
         super().__init__()
+
+        # Signal management for compare mode coordination
+        # MUST be set early before any refresh/highlight calls
+        self._automatic_highlighting_enabled = True
+
         self.line_number_area = LineNumberArea(self)
         self.blockCountChanged.connect(self.update_line_number_area_width)
         self.updateRequest.connect(self.update_line_number_area)
@@ -250,7 +255,29 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             bottom = top + self.blockBoundingRect(block).height()
             block_number += 1
 
-    def highlight_current_line(self):
+    def _refresh_display(self):
+        """
+        Unified refresh method that updates both the line number area and editor selections.
+
+        This method should be called instead of calling line_number_area.update() and
+        highlight_current_line() separately to avoid redundant refreshes.
+
+        In compare mode, automatic highlighting is disabled and nksePanel manages selections,
+        so we skip the selection update to avoid overriding diff highlights.
+        """
+        self.line_number_area.update()
+
+        # Only update selections if automatic highlighting is enabled
+        # When disabled (compare mode), nksePanel is in full control of setExtraSelections()
+        if self._automatic_highlighting_enabled:
+            self._update_extra_selections()
+
+    def _update_extra_selections(self):
+        """
+        Internal method to rebuild extra selections (current line, validation errors, error line).
+
+        This is called by _refresh_display() and should not trigger additional refreshes.
+        """
         extra_selections = []
 
         # Highlight error line with red background (highest priority - paste error)
@@ -309,6 +336,14 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             extra_selections.append(selection)
 
         self.setExtraSelections(extra_selections)
+
+    def highlight_current_line(self):
+        """
+        Public method to refresh current line highlighting.
+
+        This is connected to cursorPositionChanged signal and triggers a full display refresh.
+        """
+        self._refresh_display()
 
     def _on_contents_change(self, position, chars_removed, chars_added):
         """
@@ -476,15 +511,13 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             line_number (int): The 1-based line number to mark as error
         """
         self.error_line = line_number
-        self.line_number_area.update()
-        self.highlight_current_line()  # Refresh highlighting
+        self._refresh_display()
         logger.debug(f"Error line set to {line_number}")
 
     def clear_error_line(self):
         """Clear the error line marker."""
         self.error_line = None
-        self.line_number_area.update()
-        self.highlight_current_line()  # Refresh highlighting
+        self._refresh_display()
         logger.debug("Error line cleared")
 
     def set_next_debug_point(self):
@@ -529,9 +562,8 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         errors = nkValidator.validate_script(script_text)
         self.validation_errors = nkValidator.get_errors_by_line(errors)
 
-        # Refresh display
-        self.line_number_area.update()
-        self.highlight_current_line()
+        # Refresh display once
+        self._refresh_display()
 
         logger.debug(f"Validation complete: {len(errors)} errors found")
         return errors
@@ -544,14 +576,12 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             errors (list[StructureError]): List of validation errors
         """
         self.validation_errors = nkValidator.get_errors_by_line(errors)
-        self.line_number_area.update()
-        self.highlight_current_line()
+        self._refresh_display()
 
     def clear_validation_errors(self):
         """Clear all validation errors."""
         self.validation_errors = {}
-        self.line_number_area.update()
-        self.highlight_current_line()
+        self._refresh_display()
         logger.debug("Validation errors cleared")
 
     def get_validation_error_count(self):
@@ -582,6 +612,115 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
             list[StructureError]: List of errors at that line, empty if none
         """
         return self.validation_errors.get(line_number, [])
+
+    # -------------------------------------------------------------------------
+    # Compare Mode Coordination Methods
+    # -------------------------------------------------------------------------
+
+    def disable_automatic_highlighting(self):
+        """
+        Disconnect automatic highlight updates (for compare mode).
+
+        When compare mode is active, nksePanel takes full control of setExtraSelections()
+        to coordinate diff highlights with validation errors. This method disconnects
+        the automatic cursor position change handler to prevent competing updates.
+        """
+        try:
+            self.cursorPositionChanged.disconnect(self.highlight_current_line)
+            self._automatic_highlighting_enabled = False
+            logger.debug("Automatic highlighting disabled for compare mode")
+        except (TypeError, RuntimeError):
+            # Already disconnected or signal doesn't exist
+            pass
+
+    def enable_automatic_highlighting(self):
+        """
+        Reconnect automatic highlight updates (when exiting compare mode).
+
+        This restores normal operation where cursor position changes automatically
+        trigger current line highlighting and selection updates.
+        """
+        if not hasattr(self, '_automatic_highlighting_enabled'):
+            self._automatic_highlighting_enabled = True
+            return  # Already connected
+
+        if not self._automatic_highlighting_enabled:
+            try:
+                self.cursorPositionChanged.connect(self.highlight_current_line)
+                self._automatic_highlighting_enabled = True
+                logger.debug("Automatic highlighting re-enabled")
+            except (TypeError, RuntimeError):
+                # Connection failed
+                logger.warning("Failed to reconnect automatic highlighting")
+
+    def get_base_selections(self):
+        """
+        Get base selections (error line, validation, current line) without applying them.
+
+        Used by nksePanel to combine with diff selections in compare mode. This method
+        builds the selection list but does NOT call setExtraSelections().
+
+        Returns:
+            list: ExtraSelection objects for error line, validation errors, and current line
+        """
+        selections = []
+
+        # Error line highlighting (highest priority - paste errors)
+        if self.error_line is not None:
+            error_selection = QtWidgets.QTextEdit.ExtraSelection()
+            error_color = QtGui.QColor(100, 30, 30)
+            error_selection.format.setBackground(error_color)
+            error_selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            block = self.document().findBlockByNumber(self.error_line - 1)
+            if block.isValid():
+                error_selection.cursor = QtGui.QTextCursor(block)
+                error_selection.cursor.clearSelection()
+                selections.append(error_selection)
+
+        # Validation error underlines
+        for line_num, errors in self.validation_errors.items():
+            block = self.document().findBlockByNumber(line_num - 1)
+            if block.isValid():
+                for err in errors:
+                    selection = QtWidgets.QTextEdit.ExtraSelection()
+
+                    # Set underline style based on severity
+                    if err.severity == nkValidator.StructureError.ERROR:
+                        selection.format.setUnderlineColor(QtGui.QColor(255, 80, 80))
+                    else:
+                        selection.format.setUnderlineColor(QtGui.QColor(220, 180, 50))
+
+                    selection.format.setUnderlineStyle(QtGui.QTextCharFormat.WaveUnderline)
+
+                    # Position cursor at error location
+                    cursor = QtGui.QTextCursor(block)
+                    cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
+
+                    # Move to error column
+                    for _ in range(min(err.column, block.length() - 1)):
+                        cursor.movePosition(QtGui.QTextCursor.Right)
+
+                    # Select the error length (or rest of line if longer)
+                    chars_to_select = min(err.length, block.length() - err.column - 1)
+                    if chars_to_select < 1:
+                        chars_to_select = max(1, block.length() - 1)
+                    for _ in range(chars_to_select):
+                        cursor.movePosition(QtGui.QTextCursor.Right, QtGui.QTextCursor.KeepAnchor)
+
+                    selection.cursor = cursor
+                    selections.append(selection)
+
+        # Current line highlighting (only if not read-only)
+        if not self.isReadOnly():
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            line_color = QtGui.QColor(78, 78, 78)
+            selection.format.setBackground(line_color)
+            selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            selections.append(selection)
+
+        return selections
 
     # -------------------------------------------------------------------------
     # Autocomplete Methods

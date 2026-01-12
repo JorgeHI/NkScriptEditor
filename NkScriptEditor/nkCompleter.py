@@ -328,7 +328,7 @@ class CompletionPopup(QtWidgets.QListWidget):
     def _on_item_clicked(self, item):
         """Handle item click."""
         completion_text = item.data(QtCore.Qt.UserRole) or item.text()
-        print(f"[AUTOCOMPLETE] Item clicked: {completion_text}")
+        logger.debug(f"Autocomplete item clicked: {completion_text}")
         self.completionSelected.emit(completion_text)
         self.hide()
 
@@ -482,23 +482,23 @@ class AutocompleteManager(QtCore.QObject):
         self.popup.move(global_pos)
         self.popup.show()
         self.popup.raise_()  # Bring to front
-        print(f"[AUTOCOMPLETE] Popup shown with {len(completions)} completions")
+        logger.debug(f"Autocomplete popup shown with {len(completions)} completions")
 
     def _insert_completion(self, text):
         """Insert the selected completion."""
-        print(f"[AUTOCOMPLETE] _insert_completion called with text: {text}")
+        logger.debug(f"Inserting autocomplete: {text}")
         cursor = self.editor.textCursor()
-        print(f"[AUTOCOMPLETE] Cursor position before: {cursor.position()}")
+        logger.debug(f"Cursor position before: {cursor.position()}")
 
         # Remove the prefix that was already typed
         cursor.movePosition(QtGui.QTextCursor.StartOfWord, QtGui.QTextCursor.KeepAnchor)
         cursor.removeSelectedText()
-        print(f"[AUTOCOMPLETE] Cursor position after removing prefix: {cursor.position()}")
+        logger.debug(f"Cursor position after removing prefix: {cursor.position()}")
 
         # Insert completion
         cursor.insertText(text)
         self.editor.setTextCursor(cursor)
-        print(f"[AUTOCOMPLETE] Inserted completion text: {text}")
+        logger.debug(f"Inserted completion text: {text}")
 
     def handle_key_press(self, event):
         """
@@ -511,7 +511,7 @@ class AutocompleteManager(QtCore.QObject):
             return False
 
         key = event.key()
-        print(f"[AUTOCOMPLETE] handle_key_press: key={key}, Key_Return={QtCore.Qt.Key_Return}, Key_Tab={QtCore.Qt.Key_Tab}")
+        logger.debug(f"Autocomplete key press: key={key}")
 
         if key == QtCore.Qt.Key_Down:
             self.popup.move_selection(1)
@@ -521,13 +521,13 @@ class AutocompleteManager(QtCore.QObject):
             return True
         elif key in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Tab):
             current = self.popup.currentItem()
-            print(f"[AUTOCOMPLETE] Return/Tab pressed, current item: {current}")
+            logger.debug(f"Return/Tab pressed, current item: {current}")
             if current:
                 completion_text = current.data(QtCore.Qt.UserRole) or current.text()
-                print(f"[AUTOCOMPLETE] Completion text to insert: {completion_text}")
+                logger.debug(f"Completion text to insert: {completion_text}")
                 self._insert_completion(completion_text)
             else:
-                print("[AUTOCOMPLETE] WARNING: No current item selected in popup")
+                logger.warning("No current item selected in autocomplete popup")
             self.popup.hide()
             return True
         elif key == QtCore.Qt.Key_Escape:
