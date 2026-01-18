@@ -63,6 +63,12 @@ NkScriptEditor.init()
 
 # Version Log
 
+# 0.2.0
+- Validation nk script lenguage.
+- Compare two nuke scripts.
+- Highlight invalid characters in red.
+- Preference improvements.
+
 ## 0.1.1
 - Debug system with break points.
 - Preference system for highlight colors.
