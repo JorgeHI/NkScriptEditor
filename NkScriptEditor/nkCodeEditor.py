@@ -725,7 +725,17 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 self.autocomplete.hide_popup()
 
     def focusOutEvent(self, event):
-        """Hide autocomplete popup when editor loses focus."""
+        """Hide autocomplete popup when editor loses focus (unless focus went to popup)."""
+        # Don't hide popup if it's visible and might be receiving a click
+        # The popup uses WindowDoesNotAcceptFocus so this shouldn't happen often,
+        # but we check anyway for safety
+        if self.autocomplete.is_popup_visible():
+            # Check if focus is going to the popup
+            popup = self.autocomplete.popup
+            focus_widget = QtWidgets.QApplication.focusWidget()
+            if focus_widget is popup or (focus_widget and popup.isAncestorOf(focus_widget)):
+                super().focusOutEvent(event)
+                return
         self.autocomplete.hide_popup()
         super().focusOutEvent(event)
 

@@ -265,6 +265,9 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.actions_menu.addSeparator()
         self.debug_toggle_action = self.actions_menu.addAction("Show Debug")
         self.debug_toggle_action.setToolTip("Show/hide debugging controls")
+        self.actions_menu.addSeparator()
+        self.refresh_node_types_action = self.actions_menu.addAction("Refresh Node Types")
+        self.refresh_node_types_action.setToolTip("Refresh autocomplete node types from Nuke API (slow)")
 
         self.menu_button.setMenu(self.actions_menu)
         buttons_layout.addWidget(self.menu_button)
@@ -607,6 +610,7 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.validate_action.triggered.connect(self.validate_script)
         self.compare_action.triggered.connect(self.toggle_compare_view)
         self.debug_toggle_action.triggered.connect(self.toggle_debug_visibility)
+        self.refresh_node_types_action.triggered.connect(self.refresh_node_types)
 
         # Compare view signal connections
         self.close_compare_button.clicked.connect(self.toggle_compare_view)
@@ -720,6 +724,51 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.save_debug_visibility_preference(is_visible)
 
         logger.info(f"Debug controls {'shown' if is_visible else 'hidden'}")
+
+    def refresh_node_types(self):
+        """
+        Refresh the autocomplete node types list from Nuke API.
+
+        This operation can take several seconds as it loads all plugins.
+        Shows a message box with the result.
+        """
+        from NkScriptEditor import nkCompleter
+
+        # Show a warning that this may take a while
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Refresh Node Types",
+            "This will refresh the node types list from Nuke API.\n"
+            "This operation may take several seconds.\n\n"
+            "Continue?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.Yes
+        )
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        # Show busy cursor
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            count = nkCompleter.refresh_node_types()
+            if count >= 0:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Node Types Refreshed",
+                    f"Successfully loaded {count} node types from Nuke API."
+                )
+            else:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Refresh Failed",
+                    "Failed to refresh node types from Nuke API.\n"
+                    "Using default list."
+                )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
 
     def save_debug_visibility_preference(self, is_visible):
         """

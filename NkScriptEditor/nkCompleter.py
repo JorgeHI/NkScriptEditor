@@ -36,6 +36,7 @@ else:
 # =============================================================================
 
 # Node callbacks - these are standard for all nodes
+# Note: Callbacks are hardcoded as there's no Nuke API to retrieve them dynamically
 CALLBACKS = [
     ("knobChanged", "Called when any knob value changes"),
     ("onCreate", "Called when node is created"),
@@ -56,6 +57,8 @@ CALLBACKS = [
 ]
 
 # Standard knobs present on all/most nodes
+# TODO: Make this dynamic in the future by querying knobs from a base node type
+#       via Nuke API (e.g., create temp NoOp node and get its knobs)
 STANDARD_KNOBS = [
     ("name", "Node name identifier"),
     ("xpos", "X position in node graph"),
@@ -105,25 +108,172 @@ USERKNOB_TYPES = [
     ("68", "Link_Knob - Link to another knob"),
 ]
 
-# Common node types for quick reference
-COMMON_NODE_TYPES = [
-    "Root", "Grade", "ColorCorrect", "Merge2", "Merge",
-    "Transform", "Reformat", "Crop", "Read", "Write",
-    "Blur", "Defocus", "EdgeBlur", "Sharpen",
-    "Roto", "RotoPaint", "Tracker4",
-    "Shuffle", "Shuffle2", "ShuffleCopy",
-    "Copy", "CopyBBox", "AddChannels",
-    "Premult", "Unpremult", "Invert",
-    "Keyer", "Primatte", "IBKGizmo", "Keylight",
-    "Group", "NoOp", "Dot", "BackdropNode",
-    "Switch", "Dissolve", "TimeOffset",
-    "FrameHold", "FrameRange", "Retime",
-    "ScanlineRender", "Card", "Camera", "Light",
-    "Constant", "CheckerBoard", "ColorBars", "ColorWheel",
-    "Expression", "STMap", "IDistort", "LensDistortion",
-    "VectorBlur", "MotionBlur", "ZDefocus",
-    "DeepRead", "DeepWrite", "DeepMerge",
+# =============================================================================
+# Node Types
+# =============================================================================
+
+# Default node types list - comprehensive list of standard Nuke nodes
+# This can be refreshed from Nuke API via refresh_node_types() but that call
+# is slow (nuke.nodeTypes(force_plugin_load=True) takes several seconds)
+DEFAULT_NODE_TYPES = [
+    'Add', 'AddChannels', 'AddMix', 'AddSTMap', 'AddTimeCode', 'AdjBBox', 'AmbientOcclusion',
+    'Anaglyph', 'Annotations', 'AppendClip', 'ApplyLUT', 'ApplyMaterial', 'Assert', 'AttribGeo',
+    'AudioRead', 'Axis', 'Axis2', 'Axis3', 'Axis4', 'BackdropNode', 'BakedPointCloud',
+    'BakedPointCloudMesh', 'BasicMaterial', 'BasicSurface', 'Bezier', 'BigCat', 'Bilateral',
+    'Bilateral2', 'Black', 'BlackOutside', 'Blend', 'BlendMat', 'BlinkBlur', 'BlinkFilterErode',
+    'BlinkScript', 'BlockGPU', 'Blocky', 'Blur', 'Bokeh', 'BumpBoss', 'BumpMat', 'BurnIn',
+    'CCorrect', 'CCrosstalk', 'CMSTestPattern', 'C_AlphaGenerator2_1', 'C_Bilateral2_1',
+    'C_Blender2_1', 'C_Blur2_1', 'C_CameraIngest2_1', 'C_CameraSolver2_1', 'C_ColourMatcher2_1',
+    'C_DisparityGenerator2_1', 'C_GenerateMap2_1', 'C_GlobalWarp2_1', 'C_RayRender2_1',
+    'C_STMap2_1', 'C_SphericalTransform2_1', 'C_Stitcher2_1', 'C_Tracker2_1', 'Camera',
+    'Camera2', 'Camera3', 'Camera4', 'CameraShake', 'CameraShake2', 'CameraShake3',
+    'CameraTracker', 'CameraTracker1_0', 'CameraTrackerPointCloud', 'CameraTrackerPointCloud1_0',
+    'Card', 'Card2', 'Card3D', 'CardObj', 'CatFileCreator', 'ChannelMerge', 'ChannelSelector',
+    'Checker', 'CheckerBoard', 'CheckerBoard2', 'ChromaKeyer', 'Clamp', 'ClipTest', 'ColorBars',
+    'ColorCorrect', 'ColorLookup', 'ColorMatrix', 'ColorTransfer', 'ColorTransferWrapper',
+    'ColorWheel', 'Colorspace', 'Compare', 'CompareMetaData', 'Constant', 'ConstantShader',
+    'ContactSheet', 'Convolve', 'Convolve2', 'Copy', 'CopyBBox', 'CopyCat', 'CopyMetaData',
+    'CopyRectangle', 'CornerPin2D', 'Crop', 'CrosstalkGeo', 'Cryptomatte', 'Cube', 'CubeObj',
+    'CurveTool', 'Cylinder', 'CylinderObj', 'DeInterlace', 'Deblur', 'DeepChannelBlanker',
+    'DeepClip', 'DeepClipZ', 'DeepColorCorrect', 'DeepColorCorrect2', 'DeepCompare', 'DeepCrop',
+    'DeepDeOverlap', 'DeepExpression', 'DeepFromFrames', 'DeepFromImage', 'DeepHoldout',
+    'DeepHoldout2', 'DeepMask', 'DeepMerge', 'DeepMerge2', 'DeepOmit', 'DeepRead', 'DeepRecolor',
+    'DeepReformat', 'DeepSample', 'DeepShift', 'DeepToImage', 'DeepToImage2', 'DeepToPoints',
+    'DeepTransform', 'DeepVolumeMaker', 'DeepWrite', 'Defocus', 'DegrainBlue', 'DegrainSimple',
+    'Denoise2', 'DepthGenerator', 'DepthGenerator1_0', 'DepthToPoints', 'DepthToPosition',
+    'Difference', 'Diffuse', 'Dilate', 'DirBlur', 'DirBlurWrapper', 'DirectLight', 'DirectLight1',
+    'DiskCache', 'DisplaceGeo', 'Displacement', 'Dissolve', 'Dither', 'Dot', 'DrawCursorShaderOp',
+    'DropShadow', 'DualBlend', 'DustBust', 'EXPTool', 'EdgeBlur', 'EdgeDetect', 'EdgeDetectWrapper',
+    'EdgeExtend', 'EdgeScatter', 'EditGeo', 'Emboss', 'Emission', 'Encryptomatte', 'Environment',
+    'EnvironmentLight', 'Erode', 'ErrorIop', 'ExecuteTreeMT', 'Expression', 'FFT', 'FFTMultiply',
+    'F_Align', 'F_DeFlicker2', 'F_DeGrain', 'F_DeNoise', 'F_Kronos', 'F_MatchGrade', 'F_MotionBlur',
+    'F_ReGrain', 'F_RigRemoval', 'F_Steadiness', 'F_VectorGenerator', 'F_WireRemoval',
+    'FieldAttract', 'FieldCellNoise', 'FieldConstant', 'FieldCrop', 'FieldCurves', 'FieldDeform',
+    'FieldFractal', 'FieldGrid', 'FieldImage', 'FieldInvert', 'FieldLookAt', 'FieldMath',
+    'FieldMerge', 'FieldMix', 'FieldNoise', 'FieldPosition', 'FieldRadial', 'FieldRamp',
+    'FieldRender', 'FieldSelect', 'FieldShape', 'FieldShapeModify', 'FieldShapeToDensity',
+    'FieldShapeToPosition', 'FieldTransform', 'FieldTrilinearWarp', 'FieldVolume',
+    'FieldVolumeWrite', 'FieldVortex', 'FieldVortexRing', 'Fill', 'FillMat', 'FillShader',
+    'FilterErode', 'FishEye', 'Flare', 'FloodFill', 'FnNukeMultiTypeOpDeepOp',
+    'FnNukeMultiTypeOpGeoOp', 'FnNukeMultiTypeOpGeomOp', 'FnNukeMultiTypeOpIop',
+    'FnNukeMultiTypeOpParticleOp', 'Fog', 'FrameBlend', 'FrameHold', 'FrameRange', 'FromDeep',
+    'GPUFileShader', 'GPUOp', 'Gamma', 'GenerateLUT', 'GenerateLUTGeo', 'GeoActivation',
+    'GeoBakedMesh', 'GeoBakedPointCloud', 'GeoBakedPointCloudMesh', 'GeoBakedPoints',
+    'GeoBindMaterial', 'GeoCamera', 'GeoCameraTrackerPoints', 'GeoCameraTrackerPoints1_0',
+    'GeoCard', 'GeoClearMask', 'GeoCollection', 'GeoColorSpace', 'GeoCompare', 'GeoConstrain',
+    'GeoCube', 'GeoCylinder', 'GeoDeletePoints', 'GeoDiskLight', 'GeoDisplace', 'GeoDistantLight',
+    'GeoDomeLight', 'GeoDrawMode', 'GeoDuplicate', 'GeoEditLight', 'GeoExport', 'GeoFieldMesh',
+    'GeoFieldSet', 'GeoFieldWarp', 'GeoGeneratePoints', 'GeoGrade', 'GeoImport', 'GeoInstance',
+    'GeoMask', 'GeoMerge', 'GeoNoise', 'GeoNormals', 'GeoPointInstancer', 'GeoPoints',
+    'GeoPointsToMesh', 'GeoProjectUV', 'GeoPython', 'GeoRadialWarp', 'GeoReference', 'GeoScene',
+    'GeoScope', 'GeoScript', 'GeoSelect', 'GeoSelection', 'GeoSetVariant', 'GeoSphere',
+    'GeoSphereLight', 'GeoSplat', 'GeoStageEdit', 'GeoTransform', 'GeoTriangle',
+    'GeoTrilinearWarp', 'GeoTwist', 'GeoViewScene', 'GeoVisibility', 'GeoXform', 'GeomNode',
+    'GeomOpTester', 'Gizmo', 'Glint', 'Glow', 'Glow2', 'GodRays', 'Grade', 'Grain', 'Grain2',
+    'Grid', 'GridWarp', 'GridWarp2', 'GridWarp3', 'GridWarpTracker', 'Group', 'HSVTool',
+    'HistEQ', 'Histogram', 'HueCorrect', 'HueKeyer', 'HueShift', 'IBK', 'IBK2Gizmo', 'IBKColour',
+    'IBKColourV3', 'IBKEdge', 'IBKGizmo', 'IBKGizmoV3', 'IBKSFill', 'IBKSplit', 'IDistort',
+    'IT8_Reader', 'IT8_Writer', 'ImageField', 'Inference', 'Inpaint', 'Inpaint2', 'Input',
+    'InternalTimelineDefaultInput', 'InvFFT', 'Invert', 'JoinViews', 'Keyer', 'Keylight',
+    'Keymix', 'Kronos', 'Laplacian', 'LayerContactSheet', 'LensDistortion', 'LensDistortion1_0',
+    'LensDistortion2', 'LevelSet', 'Light', 'Light2', 'Light3', 'Light4', 'LightWrap',
+    'LiveGroup', 'LiveInput', 'Log2Lin', 'LogGeo', 'LookupGeo', 'MakeLatLongMap', 'MarkerRemoval',
+    'MatchGrade', 'Matrix', 'Median', 'Merge', 'Merge2', 'MergeExpression', 'MergeGeo',
+    'MergeLayerShader', 'MergeMat', 'MeshGeo', 'MinColor', 'MindRead', 'Mirror', 'Mirror2',
+    'MixViews', 'ModelBuilder', 'ModelBuilderGeo', 'Modeler', 'Modeler1_0', 'ModifyMetaData',
+    'ModifyRIB', 'MotionBlur', 'MotionBlur2D', 'MotionBlur3D', 'MtlXStandardSurface',
+    'MultiTexture', 'Multiply', 'NoOp', 'NoProxy', 'NoTimeBlur', 'NodeWrapper', 'Noise',
+    'Normals', 'OCIOCDLTransform', 'OCIOColorSpace', 'OCIODisplay', 'OCIOFileTransform',
+    'OCIOLogConvert', 'OCIOLookTransform', 'OCIONamedTransform', 'OFlow2', 'OneView',
+    'OpStatisticsOp', 'Output', 'PLogLin', 'PSDMerge', 'Paint', 'PanelNode',
+    'ParticleAttractToSphere', 'ParticleBlinkScript', 'ParticleBlinkScriptRender',
+    'ParticleBounce', 'ParticleCache', 'ParticleColorByAge', 'ParticleConstrainToSphere',
+    'ParticleCurve', 'ParticleCylinderFlow', 'ParticleDirection', 'ParticleDirectionalForce',
+    'ParticleDistributeSphere', 'ParticleDrag', 'ParticleDrag2', 'ParticleEmitter',
+    'ParticleExpression', 'ParticleFieldForce', 'ParticleFlock', 'ParticleFuse',
+    'ParticleGravity', 'ParticleGrid', 'ParticleHelixFlow', 'ParticleInfo', 'ParticleKill',
+    'ParticleLookAt', 'ParticleMerge', 'ParticleMotionAlign', 'ParticleMove',
+    'ParticlePointForce', 'ParticleProjectDisplace', 'ParticleProjectImage', 'ParticleRender',
+    'ParticleSettings', 'ParticleShockWave', 'ParticleSpawn', 'ParticleSpeedLimit',
+    'ParticleSystem', 'ParticleToGeo', 'ParticleToImage', 'ParticleTurbulence', 'ParticleVortex',
+    'ParticleWind', 'PerspDistort', 'Phong', 'PixelStat', 'PixelSum', 'PlanarTracker',
+    'PlanarTracker1_0', 'PointCloudGenerator', 'PointCloudGenerator1_0', 'PointLight',
+    'PointsTo3D', 'PoissonMesh', 'Position', 'PositionToPoints', 'PositionToPoints2',
+    'PostageStamp', 'Posterize', 'Precomp', 'Preferences', 'Premult', 'PreviewSurface',
+    'Primatte', 'Primatte3', 'PrimatteAdjustLighting', 'PrintHash', 'PrintMetaData', 'ProcGeo',
+    'Profile', 'Project3D', 'Project3D2', 'Project3DShader', 'ProjectionSolver',
+    'ProjectionSolver1_0', 'PythonGeo', 'Radial', 'RadialDistort', 'Ramp', 'RayRender',
+    'ReConverge', 'ReLight', 'Read', 'ReadGeo', 'ReadGeo2', 'Reconcile3D', 'Rectangle',
+    'Reflection', 'ReflectiveSurface', 'Reformat', 'Refraction', 'Remove', 'RendermanShader',
+    'Retime', 'RolloffContrast', 'Roto', 'RotoPaint', 'STMap', 'Sampler', 'Saturation',
+    'ScanlineRender', 'ScanlineRender2', 'ScannedGrain', 'Scene', 'SceneOpNode', 'Sharpen',
+    'Shuffle', 'Shuffle1', 'Shuffle2', 'ShuffleCopy', 'ShuffleViews', 'SideBySide', 'SimpleAxis',
+    'SmartVector', 'SoftClip', 'Soften', 'Sparkles', 'Specular', 'Sphere', 'SphereObj',
+    'SphereToLatLongMap', 'SphericalMap', 'SphericalTransform', 'SphericalTransform2',
+    'SplatRender', 'SplineWarp', 'SplineWarp2', 'SplineWarp3', 'SpotLight1', 'Spotlight',
+    'StabTrack', 'Stabilize2D', 'StarField', 'StickyNote', 'SurfaceOptions', 'Switch',
+    'TVIscale', 'TVIscale2', 'TemporalMedian', 'Text', 'Text2', 'TextureFile', 'TextureMap',
+    'TextureSampler', 'Tile', 'TimeBlend', 'TimeBlur', 'TimeClip', 'TimeDissolve', 'TimeEcho',
+    'TimeOffset', 'TimeShift', 'TimeToDepth', 'TimeWarp', 'ToDeep', 'Toe2', 'Tracker',
+    'Tracker3', 'Tracker4', 'Transform', 'Transform3D', 'TransformGeo', 'TransformMasked',
+    'Transmission', 'Trilinear', 'Twist', 'TwistGeo', 'UVProject', 'UVTile2', 'Ultimatte',
+    'UnmultColor', 'Unpremult', 'UnrealReader', 'Unwrap', 'UpRez', 'Upscale', 'VariableGroup',
+    'VariableSwitch', 'VectorBlur', 'VectorBlur2', 'VectorCornerPin', 'VectorDistort',
+    'VectorGenerator', 'VectorToMotion', 'Vectorfield', 'ViewMetaData', 'Viewer',
+    'ViewerCaptureOp', 'ViewerChannelSelector', 'ViewerClipTest', 'ViewerDitherDisable',
+    'ViewerDitherHighFrequency', 'ViewerDitherLowFrequency', 'ViewerGain', 'ViewerGamma',
+    'ViewerInterlacedStereo', 'ViewerLUT', 'ViewerProcess_1DLUT', 'ViewerProcess_None',
+    'ViewerSaturation', 'ViewerScopeOp', 'ViewerWipe', 'VolumeRays', 'Wireframe',
+    'WireframeShader', 'Write', 'WriteGeo', 'ZBlur', 'ZComp', 'ZDefocus', 'ZDefocus2',
+    'ZFDefocus', 'ZMerge', 'ZRMerge', 'ZSlice', 'add32p', 'objReaderObj', 'remove32p',
 ]
+
+# Active node types list - starts with defaults, can be refreshed from Nuke API
+_node_types_cache = None
+
+
+def get_node_types():
+    """
+    Get available node types for autocomplete.
+
+    Returns the cached list if available, otherwise returns the default list.
+    Use refresh_node_types() to update from Nuke API.
+
+    Returns:
+        list[str]: List of node type names
+    """
+    global _node_types_cache
+    if _node_types_cache is not None:
+        return _node_types_cache
+    return DEFAULT_NODE_TYPES
+
+
+def refresh_node_types():
+    """
+    Refresh node types list from Nuke API.
+
+    This calls nuke.nodeTypes(force_plugin_load=True) which can take several
+    seconds as it loads all plugins. Should be called explicitly by user action,
+    not automatically on startup.
+
+    Returns:
+        int: Number of node types loaded, or -1 on error
+    """
+    global _node_types_cache
+    try:
+        _node_types_cache = nuke.nodeTypes(force_plugin_load=True)
+        logger.info(f"Refreshed node types from Nuke API: {len(_node_types_cache)} types loaded")
+        return len(_node_types_cache)
+    except Exception as e:
+        logger.warning(f"Failed to refresh node types from Nuke API: {e}")
+        return -1
+
+
+def reset_node_types_to_default():
+    """Reset node types to the default list."""
+    global _node_types_cache
+    _node_types_cache = None
+    logger.debug("Node types reset to default list")
 
 
 # =============================================================================
@@ -293,17 +443,19 @@ class CompletionPopup(QtWidgets.QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Use Qt.Tool instead of Qt.Popup to prevent aggressive auto-hiding
-        # Qt.Popup can close unexpectedly on focus events
+        # Use Qt.Tool with Qt.WindowDoesNotAcceptFocus to prevent stealing focus from editor
+        # This ensures keyboard events stay with the editor while popup is visible
         self.setWindowFlags(
             QtCore.Qt.Tool |
             QtCore.Qt.FramelessWindowHint |
-            QtCore.Qt.WindowStaysOnTopHint
+            QtCore.Qt.WindowStaysOnTopHint |
+            QtCore.Qt.WindowDoesNotAcceptFocus
         )
-        # Use ClickFocus so the popup can receive mouse clicks
-        # but won't steal focus from editor on keyboard navigation
-        self.setFocusPolicy(QtCore.Qt.ClickFocus)
+        # NoFocus policy prevents popup from taking focus on any interaction
+        self.setFocusPolicy(QtCore.Qt.NoFocus)
         self.setMouseTracking(True)
+        # Prevent the widget from activating (taking focus)
+        self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
 
         # Styling
         self.setStyleSheet("""
@@ -326,16 +478,20 @@ class CompletionPopup(QtWidgets.QListWidget):
             }
         """)
 
-        self.itemClicked.connect(self._on_item_clicked)
         self.setMaximumHeight(200)
         self.setMinimumWidth(250)
 
-    def _on_item_clicked(self, item):
-        """Handle item click."""
-        completion_text = item.data(QtCore.Qt.UserRole) or item.text()
-        logger.debug(f"Autocomplete item clicked: {completion_text}")
-        self.completionSelected.emit(completion_text)
-        self.hide()
+    def mousePressEvent(self, event):
+        """Handle mouse press to select completion without taking focus."""
+        item = self.itemAt(event.pos())
+        if item:
+            completion_text = item.data(QtCore.Qt.UserRole) or item.text()
+            logger.debug(f"Autocomplete item clicked: {completion_text}")
+            self.completionSelected.emit(completion_text)
+            self.hide()
+        else:
+            # Click outside items - hide popup
+            self.hide()
 
     def keyPressEvent(self, event):
         """Handle key presses for navigation."""
@@ -400,6 +556,7 @@ class AutocompleteManager(QtCore.QObject):
         self.popup.completionSelected.connect(self._insert_completion)
         self.enabled = True
         self.min_chars = 2  # Minimum characters before showing completions
+        self._current_context = None  # Store context for completion insertion
 
         # Install event filter to handle clicks outside popup
         self.editor.installEventFilter(self)
@@ -445,9 +602,9 @@ class AutocompleteManager(QtCore.QObject):
                 if type_id.startswith(prefix) or desc.lower().startswith(prefix_lower):
                     completions.append((type_id, desc))
 
-        # If at root level, suggest node types
+        # If at root level, suggest node types (loaded dynamically from Nuke API)
         elif not context['in_node']:
-            for node_type in COMMON_NODE_TYPES:
+            for node_type in get_node_types():
                 if node_type.lower().startswith(prefix_lower):
                     completions.append((node_type, "Node type"))
 
@@ -469,7 +626,11 @@ class AutocompleteManager(QtCore.QObject):
         # Don't show if prefix too short
         if len(prefix) < self.min_chars:
             self.popup.hide()
+            self._current_context = None
             return
+
+        # Store context for use in completion insertion
+        self._current_context = context
 
         # Get completions
         completions = self._get_completions(context, prefix)
@@ -500,10 +661,34 @@ class AutocompleteManager(QtCore.QObject):
         cursor.removeSelectedText()
         logger.debug(f"Cursor position after removing prefix: {cursor.position()}")
 
-        # Insert completion
-        cursor.insertText(text)
-        self.editor.setTextCursor(cursor)
-        logger.debug(f"Inserted completion text: {text}")
+        # Check if this is a node type completion (at root level, not inside a node)
+        is_node_type = (
+            self._current_context is not None and
+            not self._current_context.get('in_node', True) and
+            text in get_node_types()
+        )
+
+        if is_node_type:
+            # Insert full node definition structure:
+            # NodeType {
+            #     <cursor here>
+            # }
+            indent = " "  # Single space indent for .nk files
+            node_text = f"{text} {{\n{indent}\n}}"
+            cursor.insertText(node_text)
+            # Move cursor to end of indent on the middle line (2 chars back: \n and })
+            cursor.movePosition(QtGui.QTextCursor.Left)  # before }
+            cursor.movePosition(QtGui.QTextCursor.Left)  # before \n (now at end of indent line)
+            self.editor.setTextCursor(cursor)
+            logger.debug(f"Inserted node type with brackets: {text}")
+        else:
+            # Regular completion - just insert the text
+            cursor.insertText(text)
+            self.editor.setTextCursor(cursor)
+            logger.debug(f"Inserted completion text: {text}")
+
+        # Clear stored context
+        self._current_context = None
 
     def handle_key_press(self, event):
         """
