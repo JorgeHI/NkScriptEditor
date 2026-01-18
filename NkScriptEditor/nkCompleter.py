@@ -392,13 +392,20 @@ def detect_context(text, cursor_position):
     current_line = lines_before[-1] if lines_before else ''
     context['line_text'] = current_line
 
-    # Check if at line start (only whitespace before cursor on this line)
-    context['at_line_start'] = not current_line.strip()
-
     # Extract current word being typed
     word_match = re.search(r'(\w*)$', current_line)
     if word_match:
         context['current_word'] = word_match.group(1)
+
+    # Check if at line start (only whitespace before the current word)
+    # This determines if we're typing a knob name vs a knob value
+    if context['current_word']:
+        # Get text before the current word
+        text_before_word = current_line[:len(current_line) - len(context['current_word'])]
+        context['at_line_start'] = not text_before_word.strip()
+    else:
+        # No word being typed - check if line is empty/whitespace
+        context['at_line_start'] = not current_line.strip()
 
     # Find if we're inside a node by tracking brace depth
     # Go backwards through the text

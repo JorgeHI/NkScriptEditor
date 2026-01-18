@@ -68,6 +68,7 @@ NkScriptEditor.init()
 - Compare two nuke scripts.
 - Highlight invalid characters in red.
 - Preference improvements.
+- Node type and knob autocompletion.
 
 ## 0.1.1
 - Debug system with break points.
