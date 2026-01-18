@@ -42,6 +42,8 @@ class PreferenceTabWidget(QtWidgets.QWidget):
 
     wrapTextToggled = QtCore.Signal(bool)
     apply_preferences = QtCore.Signal(dict)
+    showEncodingToggled = QtCore.Signal(bool)
+    validationToggled = QtCore.Signal(bool)
 
     def __init__(self):
         """Initialize the preference panel with UI elements and load saved or default preferences."""
@@ -57,6 +59,16 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         self.wrap_checkbox = QtWidgets.QCheckBox("Wrap text")
         self.wrap_checkbox.setChecked(True)
         textEdit_pref_layout.addWidget(self.wrap_checkbox)
+        # Show encoding selector checkbox
+        self.show_encoding_checkbox = QtWidgets.QCheckBox("Show encoding selector")
+        self.show_encoding_checkbox.setChecked(False)  # Disabled by default
+        self.show_encoding_checkbox.setToolTip("Show/hide the encoding combobox in the editor (defaults to UTF-8 when hidden)")
+        textEdit_pref_layout.addWidget(self.show_encoding_checkbox)
+        # Enable validation checkbox
+        self.enable_validation_checkbox = QtWidgets.QCheckBox("Enable script validation")
+        self.enable_validation_checkbox.setChecked(True)  # Enabled by default
+        self.enable_validation_checkbox.setToolTip("Enable/disable automatic script validation (checks for syntax errors and warnings)")
+        textEdit_pref_layout.addWidget(self.enable_validation_checkbox)
 
         highlight_group = QtWidgets.QGroupBox("Highlighting Colors")
         prefs_layout.addWidget(highlight_group)
@@ -112,6 +124,8 @@ class PreferenceTabWidget(QtWidgets.QWidget):
 
         # Signals
         self.wrap_checkbox.toggled.connect(self.wrapTextToggled.emit)
+        self.show_encoding_checkbox.toggled.connect(self.showEncodingToggled.emit)
+        self.enable_validation_checkbox.toggled.connect(self.validationToggled.emit)
 
         # Load Preferences
         if os.path.isfile(nkConstants.pref_filepath):
@@ -123,6 +137,7 @@ class PreferenceTabWidget(QtWidgets.QWidget):
     def force_refresh(self):
         """Force re-emit of current wrap text and highlight preferences to apply changes instantly."""
         self.wrapTextToggled.emit(self.wrap_checkbox.isChecked())
+        self.showEncodingToggled.emit(self.show_encoding_checkbox.isChecked())
         self.apply_preferences.emit(self.collect_color_preferences())
 
     def apply_default_preferences(self):
@@ -130,6 +145,8 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         # Wrap text default
         prefs = {}
         prefs["wrap"] = False
+        prefs["show_encoding"] = False  # Encoding selector hidden by default
+        prefs["enable_validation"] = True  # Validation enabled by default
         # Defaults for highlight colors
         prefs["highlight"] = {
             'node_type':       {'color': [255, 200, 150], 'bold': True},
@@ -147,14 +164,41 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         Apply a dictionary of saved preferences to the UI widgets.
 
         Args:
-            prefs (dict): The preference dictionary with wrap and highlight settings.
+            prefs (dict): The preference dictionary with wrap, show_encoding, enable_validation, and highlight settings.
         """
         if prefs.get("wrap") is not None:
             self.wrap_checkbox.setChecked(prefs["wrap"])
+        if prefs.get("show_encoding") is not None:
+            self.show_encoding_checkbox.setChecked(prefs["show_encoding"])
+        if prefs.get("enable_validation") is not None:
+            self.enable_validation_checkbox.setChecked(prefs["enable_validation"])
+
+        # Get highlight preferences with defaults as fallback
         highlight_prefs = prefs.get("highlight", {})
-        for attr, opts in highlight_prefs.items():
+
+        # Default highlight colors (used if not in saved preferences)
+        default_highlights = {
+            'node_type':       {'color': [255, 200, 150], 'bold': True},
+            'flag':            {'color': [120, 180, 255], 'bold': False},
+            'node_name':       {'color': [255, 255, 255], 'bold': True},
+            'knob':            {'color': [200, 160, 255], 'bold': False},
+            'user_knob':       {'color': [240, 220, 160], 'bold': False},
+            'user_knob_name':  {'color': [220, 220, 160], 'bold': False},
+            'callback':        {'color': [128, 200, 255], 'bold': True},
+        }
+
+        # Apply highlights for all preference items
+        for label_text, attr in self.pref_items:
+            # Use saved value if exists, otherwise use default
+            opts = highlight_prefs.get(attr, default_highlights.get(attr, {'color': [255, 255, 255], 'bold': False}))
+
+            # Ensure color exists and is valid
+            if opts.get('color') is None:
+                opts['color'] = default_highlights.get(attr, {}).get('color', [255, 255, 255])
+
             color = QtGui.QColor(*opts['color'])
-            bold = opts['bold']
+            bold = opts.get('bold', False)
+
             # Set color button stylesheet
             btn = getattr(self, f"{attr}_color_button")
             btn.setStyleSheet(f"background-color: {color.name()};")
@@ -260,10 +304,12 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         Collect all user preferences including wrap setting and syntax highlight formatting.
 
         Returns:
-            dict: Full preference dictionary including "wrap" and "highlight" keys.
+            dict: Full preference dictionary including "wrap", "show_encoding", "enable_validation", and "highlight" keys.
         """
         prefs = {}
         prefs["wrap"] = self.wrap_checkbox.isChecked()
+        prefs["show_encoding"] = self.show_encoding_checkbox.isChecked()
+        prefs["enable_validation"] = self.enable_validation_checkbox.isChecked()
         prefs["highlight"] = self.collect_color_preferences()
 
         return prefs

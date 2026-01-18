@@ -46,6 +46,7 @@ WIP
 3. Add this code:
 ```python
 import NkScriptEditor
+NkScriptEditor.init()
 ```
 4. Restart Nuke.
 
@@ -61,6 +62,13 @@ import NkScriptEditor
 - [Linkedin](https://www.linkedin.com/in/jorgehi-vfx/)
 
 # Version Log
+
+# 0.2.0
+- Validation nk script lenguage.
+- Compare two nuke scripts.
+- Highlight invalid characters in red.
+- Preference improvements.
+- Node type and knob autocompletion.
 
 ## 0.1.1
 - Debug system with break points.
