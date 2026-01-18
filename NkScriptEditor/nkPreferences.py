@@ -66,7 +66,7 @@ class PreferenceTabWidget(QtWidgets.QWidget):
         textEdit_pref_layout.addWidget(self.show_encoding_checkbox)
         # Enable validation checkbox
         self.enable_validation_checkbox = QtWidgets.QCheckBox("Enable script validation")
-        self.enable_validation_checkbox.setChecked(False)  # Enabled by default
+        self.enable_validation_checkbox.setChecked(True)  # Enabled by default
         self.enable_validation_checkbox.setToolTip("Enable/disable automatic script validation (checks for syntax errors and warnings)")
         textEdit_pref_layout.addWidget(self.enable_validation_checkbox)
 

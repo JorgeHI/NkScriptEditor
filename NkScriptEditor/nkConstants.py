@@ -45,6 +45,34 @@ class nkRegex:
         r"filenameFilter|validateFilename|autoSaveFilter|autoSaveRestoreFilter)\s"
     )
 
+class colors:
+    """Centralized color definitions for theming consistency."""
+    # Validation colors
+    error_line_bg = (100, 30, 30)           # Dark red - paste error line background
+    error_underline = (255, 80, 80)         # Bright red - validation error underline
+    warning_underline = (220, 180, 50)      # Yellow/orange - validation warning underline
+    current_line = (78, 78, 78)             # Gray - current line highlight
+    paste_error_icon = (255, 100, 100)      # Red - paste error X icon
+
+    # Line number area backgrounds for validation errors/warnings
+    line_num_error_bg = (120, 40, 40)       # Error with marker
+    line_num_error_light_bg = (100, 50, 50) # Error without marker
+    line_num_warning_bg = (90, 90, 50)      # Warning with marker
+    line_num_warning_light_bg = (90, 70, 30) # Warning without marker
+
+    # Validation marker icons
+    validation_error_icon = (255, 80, 80)   # Red exclamation mark
+    validation_warning_icon = (220, 180, 50) # Yellow triangle
+
+    # Diff viewer colors
+    diff_add = (40, 80, 40)                 # Green - added lines
+    diff_del = (100, 40, 40)                # Red - deleted lines
+    diff_mod = (90, 80, 40)                 # Yellow - modified lines
+    diff_equal = (45, 45, 45)               # Normal background
+    diff_empty = (35, 35, 35)               # Empty/placeholder
+    diff_line_number = (150, 150, 150)      # Line number text
+
+
 class icons:
     icons_dir = os.path.join(code_dir, "icons")
 

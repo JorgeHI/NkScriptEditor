@@ -131,7 +131,9 @@ COMMON_NODE_TYPES = [
 # =============================================================================
 
 # Cache for node knobs to avoid repeated node creation
+# Max size prevents unbounded memory growth in long Nuke sessions
 _knob_cache = {}
+_KNOB_CACHE_MAX_SIZE = 100
 
 
 def get_knobs_for_node_type(node_type):
@@ -178,7 +180,10 @@ def get_knobs_for_node_type(node_type):
             except Exception:
                 pass
 
-    # Cache the results
+    # Cache the results (with size limit to prevent unbounded memory growth)
+    if len(_knob_cache) >= _KNOB_CACHE_MAX_SIZE:
+        _knob_cache.clear()
+        logger.debug("Knob cache cleared due to size limit")
     _knob_cache[node_type] = knobs
     return knobs
 
@@ -238,7 +243,7 @@ def detect_context(text, cursor_position):
     context['line_text'] = current_line
 
     # Check if at line start (only whitespace before cursor on this line)
-    context['at_line_start'] = current_line.strip() == '' or current_line.lstrip() == current_line[-len(current_line.lstrip()):] if current_line else True
+    context['at_line_start'] = not current_line.strip()
 
     # Extract current word being typed
     word_match = re.search(r'(\w*)$', current_line)

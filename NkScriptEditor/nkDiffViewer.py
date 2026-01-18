@@ -68,13 +68,13 @@ class DiffTextEdit(QtWidgets.QPlainTextEdit):
         font.setStyleHint(QtGui.QFont.Monospace)
         self.setFont(font)
 
-        # Colors for diff highlighting
+        # Colors for diff highlighting (from centralized constants)
         self.colors = {
-            'add': QtGui.QColor(40, 80, 40),      # Dark green
-            'del': QtGui.QColor(100, 40, 40),     # Dark red
-            'mod': QtGui.QColor(90, 80, 40),      # Dark yellow/orange
-            'equal': QtGui.QColor(45, 45, 45),    # Normal background
-            'empty': QtGui.QColor(35, 35, 35),    # Empty/placeholder
+            'add': QtGui.QColor(*nkConstants.colors.diff_add),
+            'del': QtGui.QColor(*nkConstants.colors.diff_del),
+            'mod': QtGui.QColor(*nkConstants.colors.diff_mod),
+            'equal': QtGui.QColor(*nkConstants.colors.diff_equal),
+            'empty': QtGui.QColor(*nkConstants.colors.diff_empty),
         }
 
     def line_number_area_width(self):
@@ -128,7 +128,7 @@ class DiffTextEdit(QtWidgets.QPlainTextEdit):
 
                 # Draw line number
                 number = str(block_number + 1)
-                painter.setPen(QtGui.QColor(150, 150, 150))
+                painter.setPen(QtGui.QColor(*nkConstants.colors.diff_line_number))
                 painter.drawText(0, int(top), self.line_number_area.width() - 5,
                                  self.fontMetrics().height(),
                                  QtCore.Qt.AlignRight, number)

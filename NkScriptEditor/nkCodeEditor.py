@@ -11,6 +11,7 @@
 from NkScriptEditor import nkUtils
 from NkScriptEditor import nkValidator
 from NkScriptEditor import nkCompleter
+from NkScriptEditor import nkConstants
 # Create logger
 logger = nkUtils.getLogger(__name__)
 
@@ -191,19 +192,19 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 # Highlight error line with a red tint (highest priority - paste errors)
                 if line_num == self.error_line:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
-                                     int(self.fontMetrics().height()), QtGui.QColor(120, 40, 40))
+                                     int(self.fontMetrics().height()), QtGui.QColor(*nkConstants.colors.line_num_error_bg))
                 # Highlight validation errors (structure errors)
                 elif has_validation_error and has_error_severity:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
-                                     int(self.fontMetrics().height()), QtGui.QColor(100, 50, 50))
+                                     int(self.fontMetrics().height()), QtGui.QColor(*nkConstants.colors.line_num_error_light_bg))
                 # Highlight active debug point line with a soft yellow
                 elif line_num == self.active_debug_point:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
-                                     int(self.fontMetrics().height()), QtGui.QColor(90, 90, 50))
+                                     int(self.fontMetrics().height()), QtGui.QColor(*nkConstants.colors.line_num_warning_bg))
                 # Highlight validation warnings
                 elif has_validation_error:
                     painter.fillRect(0, int(top), self.line_number_area.width(),
-                                     int(self.fontMetrics().height()), QtGui.QColor(90, 70, 30))
+                                     int(self.fontMetrics().height()), QtGui.QColor(*nkConstants.colors.line_num_warning_light_bg))
 
                 number = str(line_num)
                 painter.setPen(QtCore.Qt.black)
@@ -214,7 +215,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 if line_num == self.error_line:
                     center_x = 10
                     center_y = int(top) + self.fontMetrics().height() / 2
-                    painter.setPen(QtGui.QPen(QtGui.QColor(255, 100, 100), 2))
+                    painter.setPen(QtGui.QPen(QtGui.QColor(*nkConstants.colors.paste_error_icon), 2))
                     size = 4
                     painter.drawLine(center_x - size, int(center_y) - size,
                                      center_x + size, int(center_y) + size)
@@ -224,7 +225,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 elif has_validation_error and has_error_severity:
                     center_x = 10
                     center_y = int(top) + self.fontMetrics().height() / 2
-                    painter.setPen(QtGui.QPen(QtGui.QColor(255, 80, 80), 2))
+                    painter.setPen(QtGui.QPen(QtGui.QColor(*nkConstants.colors.validation_error_icon), 2))
                     # Draw exclamation mark
                     painter.drawLine(center_x, int(center_y) - 5, center_x, int(center_y) + 1)
                     painter.drawPoint(center_x, int(center_y) + 4)
@@ -232,7 +233,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                 elif has_validation_error:
                     center_x = 10
                     center_y = int(top) + self.fontMetrics().height() / 2
-                    painter.setPen(QtGui.QPen(QtGui.QColor(220, 180, 50), 2))
+                    painter.setPen(QtGui.QPen(QtGui.QColor(*nkConstants.colors.validation_warning_icon), 2))
                     painter.setBrush(QtCore.Qt.NoBrush)
                     # Draw small triangle
                     points = [
@@ -278,19 +279,31 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
 
         This is called by _refresh_display() and should not trigger additional refreshes.
         """
-        extra_selections = []
+        self.setExtraSelections(self._build_base_selections())
+
+    def _build_base_selections(self):
+        """
+        Build base selections (error line, validation errors, current line).
+
+        This is the shared implementation used by both _update_extra_selections()
+        and get_base_selections().
+
+        Returns:
+            list: ExtraSelection objects for error line, validation errors, and current line
+        """
+        selections = []
 
         # Highlight error line with red background (highest priority - paste error)
         if self.error_line is not None:
             error_selection = QtWidgets.QTextEdit.ExtraSelection()
-            error_color = QtGui.QColor(100, 30, 30)  # Dark red
+            error_color = QtGui.QColor(*nkConstants.colors.error_line_bg)
             error_selection.format.setBackground(error_color)
             error_selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
             block = self.document().findBlockByNumber(self.error_line - 1)
             if block.isValid():
                 error_selection.cursor = QtGui.QTextCursor(block)
                 error_selection.cursor.clearSelection()
-                extra_selections.append(error_selection)
+                selections.append(error_selection)
 
         # Add underlines for validation errors
         for line_num, errors in self.validation_errors.items():
@@ -301,9 +314,9 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
 
                     # Set underline style based on severity
                     if err.severity == nkValidator.StructureError.ERROR:
-                        selection.format.setUnderlineColor(QtGui.QColor(255, 80, 80))
+                        selection.format.setUnderlineColor(QtGui.QColor(*nkConstants.colors.error_underline))
                     else:
-                        selection.format.setUnderlineColor(QtGui.QColor(220, 180, 50))
+                        selection.format.setUnderlineColor(QtGui.QColor(*nkConstants.colors.warning_underline))
 
                     selection.format.setUnderlineStyle(QtGui.QTextCharFormat.WaveUnderline)
 
@@ -323,19 +336,19 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
                         cursor.movePosition(QtGui.QTextCursor.Right, QtGui.QTextCursor.KeepAnchor)
 
                     selection.cursor = cursor
-                    extra_selections.append(selection)
+                    selections.append(selection)
 
         # Highlight current cursor line
         if not self.isReadOnly():
             selection = QtWidgets.QTextEdit.ExtraSelection()
-            line_color = QtGui.QColor(78, 78, 78)
+            line_color = QtGui.QColor(*nkConstants.colors.current_line)
             selection.format.setBackground(line_color)
             selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
-            extra_selections.append(selection)
+            selections.append(selection)
 
-        self.setExtraSelections(extra_selections)
+        return selections
 
     def highlight_current_line(self):
         """
@@ -663,64 +676,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):
         Returns:
             list: ExtraSelection objects for error line, validation errors, and current line
         """
-        selections = []
-
-        # Error line highlighting (highest priority - paste errors)
-        if self.error_line is not None:
-            error_selection = QtWidgets.QTextEdit.ExtraSelection()
-            error_color = QtGui.QColor(100, 30, 30)
-            error_selection.format.setBackground(error_color)
-            error_selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-            block = self.document().findBlockByNumber(self.error_line - 1)
-            if block.isValid():
-                error_selection.cursor = QtGui.QTextCursor(block)
-                error_selection.cursor.clearSelection()
-                selections.append(error_selection)
-
-        # Validation error underlines
-        for line_num, errors in self.validation_errors.items():
-            block = self.document().findBlockByNumber(line_num - 1)
-            if block.isValid():
-                for err in errors:
-                    selection = QtWidgets.QTextEdit.ExtraSelection()
-
-                    # Set underline style based on severity
-                    if err.severity == nkValidator.StructureError.ERROR:
-                        selection.format.setUnderlineColor(QtGui.QColor(255, 80, 80))
-                    else:
-                        selection.format.setUnderlineColor(QtGui.QColor(220, 180, 50))
-
-                    selection.format.setUnderlineStyle(QtGui.QTextCharFormat.WaveUnderline)
-
-                    # Position cursor at error location
-                    cursor = QtGui.QTextCursor(block)
-                    cursor.movePosition(QtGui.QTextCursor.StartOfBlock)
-
-                    # Move to error column
-                    for _ in range(min(err.column, block.length() - 1)):
-                        cursor.movePosition(QtGui.QTextCursor.Right)
-
-                    # Select the error length (or rest of line if longer)
-                    chars_to_select = min(err.length, block.length() - err.column - 1)
-                    if chars_to_select < 1:
-                        chars_to_select = max(1, block.length() - 1)
-                    for _ in range(chars_to_select):
-                        cursor.movePosition(QtGui.QTextCursor.Right, QtGui.QTextCursor.KeepAnchor)
-
-                    selection.cursor = cursor
-                    selections.append(selection)
-
-        # Current line highlighting (only if not read-only)
-        if not self.isReadOnly():
-            selection = QtWidgets.QTextEdit.ExtraSelection()
-            line_color = QtGui.QColor(78, 78, 78)
-            selection.format.setBackground(line_color)
-            selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-            selection.cursor = self.textCursor()
-            selection.cursor.clearSelection()
-            selections.append(selection)
-
-        return selections
+        return self._build_base_selections()
 
     # -------------------------------------------------------------------------
     # Autocomplete Methods

@@ -670,9 +670,6 @@ class NkScriptEditor(QtWidgets.QWidget):
 
     def load_debug_visibility_preference(self):
         """Load the debug visibility state from preferences on startup."""
-        import json
-        import os
-
         try:
             if os.path.isfile(nkConstants.pref_filepath):
                 with open(nkConstants.pref_filepath, 'r') as f:
@@ -731,9 +728,6 @@ class NkScriptEditor(QtWidgets.QWidget):
         Args:
             is_visible (bool): Whether debug controls are visible
         """
-        import json
-        import os
-
         try:
             # Load existing preferences
             if os.path.isfile(nkConstants.pref_filepath):
@@ -1001,9 +995,9 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.diff_extra_selections = []
 
         colors = {
-            'add': QtGui.QColor(40, 80, 40),    # Green
-            'del': QtGui.QColor(100, 40, 40),   # Red
-            'mod': QtGui.QColor(90, 80, 40),    # Yellow
+            'add': QtGui.QColor(*nkConstants.colors.diff_add),
+            'del': QtGui.QColor(*nkConstants.colors.diff_del),
+            'mod': QtGui.QColor(*nkConstants.colors.diff_mod),
         }
 
         for line_num, line_type in line_types_dict.items():
@@ -1035,9 +1029,9 @@ class NkScriptEditor(QtWidgets.QWidget):
         self.diff_extra_selections_right = []
 
         colors = {
-            'add': QtGui.QColor(40, 80, 40),    # Green
-            'del': QtGui.QColor(100, 40, 40),   # Red
-            'mod': QtGui.QColor(90, 80, 40),    # Yellow
+            'add': QtGui.QColor(*nkConstants.colors.diff_add),
+            'del': QtGui.QColor(*nkConstants.colors.diff_del),
+            'mod': QtGui.QColor(*nkConstants.colors.diff_mod),
         }
 
         for line_num, line_type in line_types_dict.items():
